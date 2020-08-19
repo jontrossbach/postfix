@@ -485,7 +485,7 @@ int     pipe_command(VSTREAM *src, DSN_BUF *why,...)
 	 * different code paths to set the external command's privileges.
 	 */
 	if (args.chroot) {
-	    seteuid(0);
+	    //seteuid(0);
 	    chroot_uid(args.chroot, (char *) 0);
 	}
 

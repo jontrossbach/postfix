@@ -124,18 +124,18 @@ stop_msg)
 
 start|start-fg)
 
-	$daemon_directory/master -t 2>/dev/null || {
-		$FATAL the Postfix mail system is already running
-		exit 1
-	}
+	#$daemon_directory/master -t 2>/dev/null || {
+	#	$FATAL the Postfix mail system is already running
+	#	exit 1
+	#}
 	if [ -f $queue_directory/quick-start ]
 	then
 		rm -f $queue_directory/quick-start
 	else
-		$daemon_directory/postfix-script check-fatal || {
-			$FATAL Postfix integrity check failed!
-			exit 1
-		}
+		#$daemon_directory/postfix-script check-fatal || {
+		#	$FATAL Postfix integrity check failed!
+		#	exit 1
+		#}
 		# Foreground this so it can be stopped. All inodes are cached.
 		$daemon_directory/postfix-script check-warn
 	fi

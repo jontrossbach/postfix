@@ -55,10 +55,10 @@ void    chroot_uid(const char *root_dir, const char *user_name)
 	    msg_fatal("unknown user: %s", user_name);
 	uid = pwd->pw_uid;
 	gid = pwd->pw_gid;
-	if (setgid(gid) < 0)
-	    msg_fatal("setgid(%ld): %m", (long) gid);
-	if (initgroups(user_name, gid) < 0)
-	    msg_fatal("initgroups: %m");
+//	if (setgid(gid) < 0)
+//	    msg_fatal("setgid(%ld): %m", (long) gid);
+//	if (initgroups(user_name, gid) < 0)
+//	    msg_fatal("initgroups: %m");
     }
 
     /*
@@ -74,9 +74,9 @@ void    chroot_uid(const char *root_dir, const char *user_name)
     /*
      * Drop the user privileges.
      */
-    if (user_name != 0)
-	if (setuid(uid) < 0)
-	    msg_fatal("setuid(%ld): %m", (long) uid);
+//    if (user_name != 0)
+//	if (setuid(uid) < 0)
+//	    msg_fatal("setuid(%ld): %m", (long) uid);
 
     /*
      * Give the desperate developer a clue of what is happening.

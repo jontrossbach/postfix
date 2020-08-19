@@ -53,18 +53,18 @@
 
 void    set_eugid(uid_t euid, gid_t egid)
 {
-    int     saved_errno = errno;
+//    int     saved_errno = errno;
 
-    if (geteuid() != 0)
-	if (seteuid(0))
-	    msg_fatal("set_eugid: seteuid(0): %m");
-    if (setegid(egid) < 0)
-	msg_fatal("set_eugid: setegid(%ld): %m", (long) egid);
-    if (setgroups(1, &egid) < 0)
-	msg_fatal("set_eugid: setgroups(%ld): %m", (long) egid);
-    if (euid != 0 && seteuid(euid) < 0)
-	msg_fatal("set_eugid: seteuid(%ld): %m", (long) euid);
-    if (msg_verbose)
-	msg_info("set_eugid: euid %ld egid %ld", (long) euid, (long) egid);
-    errno = saved_errno;
+    //if (geteuid() != 0)
+	//if (seteuid(0))
+	//    msg_fatal("set_eugid: seteuid(0): %m");
+//    if (setegid(egid) < 0)
+//	msg_fatal("set_eugid: setegid(%ld): %m", (long) egid);
+//    if (setgroups(1, &egid) < 0)
+//	msg_fatal("set_eugid: setgroups(%ld): %m", (long) egid);
+//    if (euid != 0 && seteuid(euid) < 0)
+//	msg_fatal("set_eugid: seteuid(%ld): %m", (long) euid);
+//    if (msg_verbose)
+//	msg_info("set_eugid: euid %ld egid %ld", (long) euid, (long) egid);
+//    errno = saved_errno;
 }

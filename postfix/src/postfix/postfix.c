@@ -520,13 +520,14 @@ int     main(int argc, char **argv)
      * privileges for selected operations. That's right - it takes privileges
      * to toss privileges.
      */
+    /*
     if (getuid() != 0) {
 	msg_error("to submit mail, use the Postfix sendmail command");
 	msg_fatal("the postfix command is reserved for the superuser");
     }
     if (unsafe() != 0)
 	msg_fatal("the postfix command must not run as a set-uid process");
-
+    */
     /*
      * Parse switches.
      */

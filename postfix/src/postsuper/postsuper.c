@@ -1328,11 +1328,12 @@ int     main(int argc, char **argv)
      * the secondary groups, the process environment, and so on. Otherwise,
      * accidents can happen. If not with Postfix, then with other software.
      */
+    /*
     if (unsafe() != 0)
 	msg_fatal("this postfix command must not run as a set-uid process");
     if (getuid())
 	msg_fatal("use of this command is reserved for the superuser");
-
+*/
     /*
      * Parse JCL.
      * 

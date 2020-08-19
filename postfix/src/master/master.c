@@ -207,6 +207,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdio.h>
 
 /* Utility library. */
 
@@ -300,6 +301,7 @@ int     main(int argc, char **argv)
     if (getenv(CONF_ENV_DEBUG))
 	debug_me = 1;
 
+
     /*
      * Don't die when a process goes away unexpectedly.
      */
@@ -342,11 +344,12 @@ int     main(int argc, char **argv)
      * privileges for selected operations. That's right - it takes privileges
      * to toss privileges.
      */
+    /*
     if (getuid() != 0)
 	msg_fatal("the master command is reserved for the superuser");
     if (unsafe() != 0)
 	msg_fatal("the master command must not run as a set-uid process");
-
+    */
     /*
      * Process JCL.
      */
@@ -427,6 +430,7 @@ int     main(int argc, char **argv)
 	    if (open("/dev/null", O_RDWR, 0) != fd)
 		msg_fatal("open /dev/null: %m");
 	}
+
 
     /*
      * Run in a separate process group, so that "postfix stop" can terminate
