@@ -58,13 +58,13 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
  config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && sudo make"
 
  # need to figure out how to run this
- #config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && yes \"\" | sudo make install"
+ config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && sudo make upgrade"
 
  # start network for postfix
  config.vm.provision "shell", inline: "sudo ifconfig eth0:1 127.0.0.1 netmask 255.255.255.255 up"
 
  # final steps to allow postfix to run permissionless
- #config.vm.provision "shell", inline: "sudo chmod -R 777 /var/spool/postfix/ && sudo chmod -R 777 /var/lib/postfix"
+ config.vm.provision "shell", inline: "sudo chmod -R 777 /var/spool/postfix/ && sudo chmod -R 777 /var/lib/postfix"
 
  # Create the "postfix" box
  config.vm.define "postfix" do |postfix|
