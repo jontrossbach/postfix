@@ -65,6 +65,9 @@ lmtp      unix  -       -       n       -       -       lmtp
 anvil     unix  -       -       n       -       1       anvil
 scache    unix  -       -       n       -       1       scache
 postlog   unix-dgram n  -       n       -       1       postlogd
+
+2525      inet  n       -       n       -       -       smtpd
+
 #
 # ====================================================================
 # Interfaces to non-Postfix software. Be sure to examine the manual
