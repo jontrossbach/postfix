@@ -56,17 +56,15 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
  config.vm.provision "shell", inline: "cd postfix/cf/ && sudo mkdir /etc/postfix && sudo cp main.cf /etc/postfix/main.cf && sudo cp master.cf /etc/postfix/master.cf"
  config.vm.provision "shell", inline: "sudo -i && echo \"postfix:*:12345:12345:postfix:/no/where:/no/shell\" >> /etc/passwd && echo \"postfix:*:12345:\" >> /etc/group && echo \"postdrop:*:54321:\" >> /etc/group && exit"
  config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && sudo make"
- config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && sudo make upgrade"
+
+ # need to figure out how to run this
+ #config.vm.provision "shell", inline: "cd /home/vagrant/postfix/postfix && yes \"\" | sudo make install"
 
  # start network for postfix
  config.vm.provision "shell", inline: "sudo ifconfig eth0:1 127.0.0.1 netmask 255.255.255.255 up"
 
  # final steps to allow postfix to run permissionless
- config.vm.provision "shell", inline: "sudo chmod -R 777 /var/spool/postfix/ && sudo chmod -R 777 /var/lib/postfix"
-
- # bootstrap and run with ansible
- #config.vm.provision "shell", inline: "sudo apt -y install mailutils"
-
+ #config.vm.provision "shell", inline: "sudo chmod -R 777 /var/spool/postfix/ && sudo chmod -R 777 /var/lib/postfix"
 
  # Create the "postfix" box
  config.vm.define "postfix" do |postfix|
