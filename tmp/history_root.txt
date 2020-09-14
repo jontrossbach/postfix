@@ -1,0 +1,46 @@
+    1  postfix stop
+    2  exit
+    3  make install
+    4  ls
+    5  cd
+    6  ls
+    7  cd ..
+    8  ls
+    9  cd home/
+   10  ls
+   11  cd vagrant/
+   12  ls
+   13  cd devel/
+   14  ls
+   15  cd postfix/
+   16  ls
+   17  cd postfix/
+   18  make install
+   19  ls
+   20  ls -l /etc/postfix/
+   21  ls -l /etc/postfix
+   22  exit
+   23  cd /var/lib/postfix/master.lock
+   24  cd /var/lib/postfix/
+   25  ls
+   26  cd ../
+   27  ls
+   28  cd ..
+   29  pwd
+   30  cd lib/
+   31  chmod -R 777 postfix/
+   32  exit
+   33  cd /var/lib/
+   34  chmod -R 777 postfix/
+   35  exit
+   36  chmod -R 777 /var/spool/postfix/
+   37  exit
+   38  ls
+   39  cd ..
+   40  ls
+   41  cd home/
+   42  ls
+   43  cd vagrant/
+   44  cd devel/
+   45  ls
+   46  history | cat > history_root.txt
