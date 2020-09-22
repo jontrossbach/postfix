@@ -635,22 +635,22 @@ trap "rm -f $tempdir/junk" 0 1 2 3 15
 
 test -z "$install_root" && {
 
-    chown root $tempdir/junk >/dev/null 2>&1 || {
-	echo Error: you have no permission to change file ownership. 1>&2
-	exit 1
-    }
+    chown root $tempdir/junk >/dev/null 2>&1 # || {
+	#echo Error: you have no permission to change file ownership. 1>&2
+	#exit 1
+    #}
 
-    chown "$mail_owner" $tempdir/junk >/dev/null 2>&1 || {
-	echo $0: Error: \"$mail_owner\" needs an entry in the passwd file. 1>&2
-	echo Remember, \"$mail_owner\" needs a dedicated user and group id. 1>&2
-	exit 1
-    }
+    chown "$mail_owner" $tempdir/junk >/dev/null 2>&1 # || {
+	#echo $0: Error: \"$mail_owner\" needs an entry in the passwd file. 1>&2
+	#echo Remember, \"$mail_owner\" needs a dedicated user and group id. 1>&2
+	#exit 1
+    #}
 
-    chgrp "$setgid_group" $tempdir/junk >/dev/null 2>&1 || {
-	echo $0: Error: \"$setgid_group\" needs an entry in the group file. 1>&2
-	echo Remember, \"$setgid_group\" needs a dedicated group id. 1>&2
-	exit 1
-    }
+    chgrp "$setgid_group" $tempdir/junk >/dev/null 2>&1 # || {
+	#echo $0: Error: \"$setgid_group\" needs an entry in the group file. 1>&2
+	#echo Remember, \"$setgid_group\" needs a dedicated group id. 1>&2
+	#exit 1
+    #}
 
 }
 
