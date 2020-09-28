@@ -344,12 +344,13 @@ int     main(int argc, char **argv)
      * privileges for selected operations. That's right - it takes privileges
      * to toss privileges.
      */
-    /*
+#ifndef USE_UNPRIV
     if (getuid() != 0)
 	msg_fatal("the master command is reserved for the superuser");
     if (unsafe() != 0)
 	msg_fatal("the master command must not run as a set-uid process");
-    */
+#endif
+
     /*
      * Process JCL.
      */

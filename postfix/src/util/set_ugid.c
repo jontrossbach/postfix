@@ -45,10 +45,11 @@
 void    set_ugid(uid_t uid, gid_t gid)
 {
     int     saved_errno = errno;
-/*
-    //if (geteuid() != 0)
-	//if (seteuid(0) < 0)
-	//    msg_fatal("seteuid(0): %m");
+
+#ifndef USE_UNPRIV
+    if (geteuid() != 0)
+	if (seteuid(0) < 0)
+	    msg_fatal("seteuid(0): %m");
     if (setgid(gid) < 0)
 	msg_fatal("setgid(%ld): %m", (long) gid);
     if (setgroups(1, &gid) < 0)
@@ -58,5 +59,5 @@ void    set_ugid(uid_t uid, gid_t gid)
     if (msg_verbose > 1)
 	msg_info("setugid: uid %ld gid %ld", (long) uid, (long) gid);
     errno = saved_errno;
-*/
+#endif
 }
