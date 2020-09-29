@@ -33,8 +33,8 @@ RUN dnf -y install git vim net-tools && \
 
     echo excludepkgs=postfix >> /etc/dnf/dnf.conf
 
-#USER postfix
+USER postfix
 
 EXPOSE 2525
 
-#ENTRYPOINT postfix start-fg
+ENTRYPOINT postfix start-fg
