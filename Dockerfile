@@ -21,7 +21,7 @@ RUN dnf -y install git vim net-tools && \
 #RUN ln -s /usr/include/libdb4/db.h /usr/include/db.h
 
     cd /postfix/postfix && \
-    cd /postfix/postfix && echo "make makefiles CCARGS='-DUSE_UNPRIV -fPIC -DUSE_TLS -DUSE_SSL -DUSE_SASL_AUTH -DUSE_CYRUS_SASL -DPREFIX=\\"/usr\\" -DHAS_LDAP -DLDAP_DEPRECATED=1 -DHAS_PCRE -I/usr/include/openssl -I/usr/include/sasl  -I/usr/include' AUXLIBS='-L/usr/local/lib -lpq -L/usr/lib64 -L/usr/lib64/openssl -lssl -lcrypto -L/usr/lib64/sasl2 -lsasl2 -lpcre -lz -lm -lldap -llber -Wl,-rpath,/usr/lib64/openssl -pie -Wl,-z,relro' OPT='-O' DEBUG='-g'" > build-postfix.sh && chmod a+x build-postfix.sh && \
+    cd /postfix/postfix && echo "make makefiles CCARGS='-DUSE_UNPRIV -fPIC -DUSE_TLS -DUSE_SSL -DUSE_SASL_AUTH -DUSE_CYRUS_SASL -DPREFIX=\\"/usr\\" -DHAS_LDAP -DLDAP_DEPRECATED=1 -DHAS_PCRE -I/usr/include/openssl -I/usr/include/sasl  -I/usr/include' AUXLIBS='-L/usr/lib64 -L/usr/lib64/openssl -lssl -lcrypto -L/usr/lib64/sasl2 -lsasl2 -lpcre -lz -lm -lldap -llber -Wl,-rpath,/usr/lib64/openssl -pie -Wl,-z,relro' OPT='-O' DEBUG='-g'" > build-postfix.sh && chmod a+x build-postfix.sh && \
     cd /postfix/postfix && ./build-postfix.sh && \
     cd /postfix/postfix && make && \
     cd /postfix/postfix && make tidy && \
@@ -33,8 +33,8 @@ RUN dnf -y install git vim net-tools && \
 
     echo excludepkgs=postfix >> /etc/dnf/dnf.conf
 
-USER postfix
+#USER postfix
 
 EXPOSE 2525
 
-ENTRYPOINT postfix start-fg
+#ENTRYPOINT postfix start-fg
