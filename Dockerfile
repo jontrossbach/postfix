@@ -16,7 +16,7 @@ RUN dnf -y install git vim net-tools && \
     git clone https://github.com/jontrossbach/postfix.git && \
 
     cd postfix/cf/ && mv main.cf /etc/postfix/main.cf && mv master.cf /etc/postfix/master.cf && \
-    echo "postfix:*:12345:12345:postfix:/no/where:/no/shell" >> /etc/passwd && echo "postfix:*:12345:" >> /etc/group && echo "postdrop:*:54321:" >> /etc/group && \
+#    echo "postfix:*:12345:12345:postfix:/no/where:/no/shell" >> /etc/passwd && echo "postfix:*:12345:" >> /etc/group && echo "postdrop:*:54321:" >> /etc/group && \
 
 #RUN ln -s /usr/include/libdb4/db.h /usr/include/db.h
 
@@ -26,14 +26,14 @@ RUN dnf -y install git vim net-tools && \
     cd /postfix/postfix && make && \
     cd /postfix/postfix && make tidy && \
     cd /postfix/postfix && ./build-postfix.sh && \
-    cd /postfix/postfix && make upgrade #&& dnf -exclude postfix && \
+    cd /postfix/postfix && make upgrade && \
 #RUN ifconfig eth0:1 127.0.0.1 netmask 255.255.255.255 up
     chmod -R 777 /var/spool/postfix/ && chmod -R 777 /var/lib/postfix && \
+    adduser notroot && \
 
+    echo "excludepkgs=postfix" >> /etc/dnf/dnf.conf
 
-    echo excludepkgs=postfix >> /etc/dnf/dnf.conf
-
-USER postfix
+USER notroot
 
 EXPOSE 2525
 
