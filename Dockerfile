@@ -2,7 +2,12 @@
 #https://serverfault.com/questions/1034517/how-can-i-enable-powertools-repository-in-centos-rhel-8
 #subscription error preventing me from using UBI8:
 #This system has no repositories available through subscriptions.
+
+#TODO master.cf and main.cf: These files should be owned by, and only writable by, the root user. They should be readable by everyone. Accourding to Postfix: A difinitive guide.
+
 FROM centos:8
+
+RUN ls
 
 RUN dnf -y install git vim net-tools && \
     dnf -y group install "Development Tools" && \
@@ -11,7 +16,7 @@ RUN dnf -y install git vim net-tools && \
     dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm && \
     dnf config-manager --set-enabled PowerTools && \
     dnf -y install libdb libdb-devel gcc openssl openssl-devel pcre pcre-devel openldap-devel cyrus-sasl cyrus-sasl-devel openldap libnsl2-devel libnsl postgresql postgresql-devel && \
-    dnf -y install make automake && \ 
+    dnf -y install make automake cyrus-sasl-plain && \ 
 
     git clone https://github.com/jontrossbach/postfix.git && \
 
@@ -33,8 +38,8 @@ RUN dnf -y install git vim net-tools && \
 
     echo "excludepkgs=postfix" >> /etc/dnf/dnf.conf
 
-#USER notroot
+USER notroot
 
 EXPOSE 2525
 
-#ENTRYPOINT postfix start-fg
+ENTRYPOINT postfix start-fg
