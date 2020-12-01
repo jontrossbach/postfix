@@ -1,1 +1,5 @@
 postfix/AAAREADME
+
+This is a for of Postfix MTA which aims to run without root prveledges inside a container enviroment. The Docker image provided was tested in openshift using the `new-app` command as follows:
+
+`oc new-app https://github.com/jontrossbach/postfix.git`
