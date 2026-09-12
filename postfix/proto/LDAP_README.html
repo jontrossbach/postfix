@@ -1,5 +1,5 @@
-<!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+s!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix LDAP Howto</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -83,9 +84,8 @@ command: </p>
 </pre>
 </blockquote>
 
-<p> If you're using the libraries from the UM distribution
-(http://www.umich.edu/~dirsvcs/ldap/ldap.html) or OpenLDAP
-(http://www.openldap.org), something like this in the top level of
+<p> If you're using the libraries from OpenLDAP
+(https://www.openldap.org), something like this in the top level of
 your Postfix source tree should work: </p>
 
 <blockquote>
@@ -95,6 +95,10 @@ your Postfix source tree should work: </p>
     AUXLIBS_LDAP="-L/usr/local/lib -lldap -L/usr/local/lib -llber"
 </pre>
 </blockquote>
+
+<p> If your LDAP shared library is in a directory that the RUN-TIME
+linker does not know about, add a "-Wl,-R,/path/to/directory" option after
+"-lldap". </p>
 
 <p> Postfix versions before 3.0 use AUXLIBS instead of AUXLIBS_LDAP.
 With Postfix 3.0 and later, the old AUXLIBS variable still supports
@@ -529,7 +533,7 @@ query_filter = (&amp;(mailacceptinggeneralid=%s)(!(|(maildrop="*|*")(maildrop="*
 </pre>
 </blockquote>
 
-<li> <p> And for that matter, even for aliases, you may not want users able to
+<li> <p> And for that matter, even for aliases, you may not want users to be able to
   specify their maildrops as programs, includes, etc. This might be
   particularly pertinent on a "sealed" server where they don't have
   local UNIX accounts, but exist only in LDAP and Cyrus. You might allow

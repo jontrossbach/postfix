@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix before-queue Milter support </title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -47,6 +48,9 @@ document for differences between Postfix and Sendmail implementations.
 <ul>
 
 <li><a href="#plumbing">How Milter applications plug into Postfix </a>
+
+<li><a href="#when-inspect">When Postfix and Milters inspect an
+SMTP session </a>
 
 <li><a href="#building">Building Milter applications</a>
 
@@ -192,10 +196,59 @@ href="QSHAPE_README.html#incoming_queue"> incoming </a> </td>
 
 </blockquote>
 
+<h2><a name="when-inspect">When Postfix and Milters inspect an SMTP
+session </a></h2>
+
+<p> Generally, Postfix inspects information first, then the first
+configured Milter, the second configured Milter, and so on. </p>
+
+<ul>
+
+<li><p> With most SMTP commands: Postfix reviews one SMTP command,
+and if Postfix does not reject it, Postfix passes the command to
+the first configured Milter. If the first Milter does not reject
+the command, Postfix passes it to the second configured Milter, and
+so on. This includes commands with an envelope sender (MAIL FROM)
+or envelope recipient (RCPT TO). Postfix stores the same envelope
+records in a queue file as when no Milters are configured, including
+rewritten envelope addresses, expanded virtual aliases, BCC addresses
+from sender/recipient_bcc_maps, and so on. </p>
+
+<li><p> With header/body content: Postfix may rewrite or reject
+header/body content before it stores that content in the queue file;
+Postfix stores the same header/body content as when no Milters are
+configured.  If Postfix does not reject the header/body content,
+Postfix passes it to the first configured Milter which may modify
+or reject that content or may modify the stored envelope. If the
+first Milter does not reject the header/body content, Postfix passes
+it to the second configured Milter, and so on. </p>
+
+</ul>
+
+<p> Details: </p>
+
+<ul>
+
+<li><p> Postfix hides its own Postfix-prepended Received: header, for
+compatibility with Sendmail. Postfix does not hide other headers that
+Postfix or Milters added or modified. </p>
+
+
+<li><p> When the Postfix SMTP server receives a sequence of one or
+more valid BDAT commands, it generates one DATA command for the
+Milters.  </p>
+
+<li><p> The Milter API does not support inspection of SMTP commands
+such as QUIT, NOOP, or VRFY; the API supports only commands that are
+needed for email delivery. <p>
+
+</ul>
+
 <h2><a name="building">Building Milter applications</a></h2>
 
-<p> Milter applications have been written in C, JAVA and Perl, but
-this document deals with C applications only.   For these, you need
+<p> Milter applications have been written in C, Haskell, Java, Perl,
+Python, Rust, and more, but
+this document covers C applications only. For these, you need
 an object library that implements the Sendmail 8 Milter protocol.
 Postfix currently does not provide such a library, but Sendmail
 does. </p>
@@ -286,10 +339,10 @@ information. </blockquote>
 <p> You specify SMTP-only Milter applications (there can be more
 than one) with the <a href="postconf.5.html#smtpd_milters">smtpd_milters</a> parameter.  Each Milter application
 is identified by the name of its listening socket; other Milter
-configuration options will be discussed in later sections.  Milter
-applications are applied in the order as specified, and the first
-Milter application that rejects a command will override the responses
-from other Milter applications.  </p>
+configuration options will be discussed in later sections. Postfix
+sends commands to each Milter application in the order as configured
+with <a href="postconf.5.html#smtpd_milters">smtpd_milters</a>. When a Milter application rejects a command,
+that will override responses from other Milter applications. </p>
 
 <blockquote>
 <pre>
@@ -309,7 +362,8 @@ from other Milter applications.  </p>
 <dt> <b>unix:</b><i>pathname</i> </dt> <dd><p>Connect to the local
 UNIX-domain server that is bound to the specified pathname. If the
 <a href="smtpd.8.html">smtpd(8)</a> or <a href="cleanup.8.html">cleanup(8)</a> process runs chrooted, an absolute pathname
-is interpreted relative to the Postfix queue directory.</p> </dd>
+is interpreted relative to the Postfix queue directory. On many
+systems, <b>local</b> is a synonym for <b>unix</b></p> </dd>
 
 <dt> <b> inet:</b><i>host</i><b>:</b><i>port</i> </dt> <dd> <p>
 Connect to the specified TCP port on the specified local or remote
@@ -347,10 +401,10 @@ information. </p>
 <p> You specify non-SMTP Milter applications with the <a href="postconf.5.html#non_smtpd_milters">non_smtpd_milters</a>
 parameter. This parameter uses the same syntax as the <a href="postconf.5.html#smtpd_milters">smtpd_milters</a>
 parameter in the previous section. As with the SMTP-only filters,
-you can specify more than one Milter application; they are applied
-in the order as specified, and the first Milter application that
-rejects a command will override the responses from the other
-applications.  </p>
+you can specify more than one Milter application. Postfix sends
+commands to each Milter application in the order as configured with
+<a href="postconf.5.html#non_smtpd_milters">non_smtpd_milters</a>. When a Milter application rejects a command,
+that will override responses from other Milter applications. </p>
 
 <blockquote>
 <pre>
@@ -576,7 +630,7 @@ and protocol.  </p>
 clients </a></h3>
 
 <p> The <a href="postconf.5.html#smtpd_milter_maps">smtpd_milter_maps</a> feature supports different Milter settings
-for different client IP addresses. Lookup results override the the
+for different client IP addresses. Lookup results override the
 global <a href="postconf.5.html#smtpd_milters">smtpd_milters</a> setting, and have the same syntax. For example,
 to disable Milter settings for local address ranges: </p>
 
@@ -650,16 +704,16 @@ verification fails: "unknown" </td> </tr>
 <td> Client name from address &rarr; name lookup <br> When address
 &rarr; name lookup fails: "unknown" </td> </tr>
 
-<tr> <td> {cert_issuer} </td> <td> HELO, MAIL, DATA, EOH, EOM </td> <td>
+<tr> <td> {cert_issuer} </td> <td> HELO, MAIL, DATA </td> <td>
 TLS client certificate issuer </td> </tr>
 
-<tr> <td> {cert_subject} </td> <td> HELO, MAIL, DATA, EOH, EOM </td>
+<tr> <td> {cert_subject} </td> <td> HELO, MAIL, DATA </td>
 <td> TLS client certificate subject </td> </tr>
 
-<tr> <td> {cipher_bits} </td> <td> HELO, MAIL, DATA, EOH, EOM </td> <td>
+<tr> <td> {cipher_bits} </td> <td> HELO, MAIL, DATA </td> <td>
 TLS session key size </td> </tr>
 
-<tr> <td> {cipher} </td> <td> HELO, MAIL, DATA, EOH, EOM </td> <td> TLS
+<tr> <td> {cipher} </td> <td> HELO, MAIL, DATA </td> <td> TLS
 cipher </td> </tr>
 
 <tr> <td> {daemon_addr} </td> <td> Always (Postfix &ge;3.2) </td>
@@ -691,7 +745,10 @@ rejected recipient: enhanced status code </td> </tr>
 <a href="postconf.5.html#smtpd_milters">smtpd_milters</a>) </td> <td> Recipient mail delivery transport <br>
 With rejected recipient: "error" </td> </tr>
 
-<tr> <td> {tls_version} </td> <td> HELO, MAIL, DATA, EOH, EOM </td>
+<tr> <td> {tls_sni} </td> <td> HELO, MAIL, DATA (Postfix &ge;3.12)
+</td> <td> TLS server name indication </td> </tr>
+
+<tr> <td> {tls_version} </td> <td> HELO, MAIL, DATA </td>
 <td> TLS protocol version </td> </tr>
 
 <tr> <td> v </td> <td> Always </td> <td> value of <a href="postconf.5.html#milter_macro_v">milter_macro_v</a>
@@ -704,10 +761,9 @@ With rejected recipient: "error" </td> </tr>
 <h3><a name="send-macros">What macros will Postfix send to Milters?</a></h3>
 
 <p> Postfix sends specific sets of macros at different Milter protocol
-stages.  The sets are configured with the parameters as shown in the
-table below (EOH = end of headers; EOM = end of message). The
-protocol version is a number that Postfix sends at the beginning
-of the Milter protocol handshake. </p>
+stages. The names of these macros are configured with the parameters
+shown in the table below (EOH = end of headers; EOM = end of message).
+Some lists require a minimum Milter protocol version.  </p>
 
 <p> As of Sendmail 8.14.0, Milter applications can specify what
 macros they want to receive at different Milter protocol stages.
@@ -758,7 +814,7 @@ transaction (for example; queue ID, sender, or recipient). </p>
 you may specify macro default values with the <a href="postconf.5.html#milter_macro_defaults">milter_macro_defaults</a>
 parameter. Specify zero or more <i>name=value</i> pairs separated by
 comma or whitespace; you may even specify macro names that Postfix does
-know about! </p>
+not know about! </p>
 
 <h2><a name="workarounds">Workarounds</a></h2>
 
@@ -920,7 +976,27 @@ only to the SMTP command information; they have no access to the
 message header or body, and cannot make modifications to the message
 or to the envelope. </p>
 
-<li> <p> Postfix 2.6 ignores the optional ESMTP parameters in
+<li> <p> Postfix 3.3 and later support the ESMTP parameters RET and
+ENVID in requests to replace the envelope sender (SMFIR_CHGFROM).
+Postfix logs a warning message when a Milter application supplies
+other ESMTP parameters: </p>
+
+<pre>
+warning: <i>queue-id</i>: cleanup_chg_from: ignoring bad ESMTP
+    parameter "<i>whatever</i>" in SMFI_CHGFROM request
+</pre>
+
+<li> <p> Postfix 3.0 and later support the ESMTP parameters NOTIFY
+and ORCPT in requests to add an envelope recipient. Postfix logs a
+warning message when a Milter application supplies other ESMTP
+parameters: </p>
+
+<pre>
+warning: <i>queue-id</i>: cleanup_add_rcpt: ignoring ESMTP argument
+    from Milter or header/body_checks: "<i>whatever</i>"
+</pre>
+
+<li> <p> Postfix 2.6 and later ignore optional ESMTP parameters in
 requests to replace the sender (SMFIR_CHGFROM) or to append a
 recipient (SMFIR_ADDRCPT_PAR). Postfix logs a warning message when
 a Milter application supplies such ESMTP parameters: </p>
@@ -940,9 +1016,8 @@ st_optionneg[134563840]: 0x3d does not fulfill action requirements 0x1e
 
 <p> The solution is to use Postfix version 2.4 or later. </p>
 
-<li> <p> Most Milter configuration options are global. Future Postfix
-versions may support per-Milter timeouts, per-Milter error handling,
-etc. </p>
+<li> <p> Postfix versions before 3.0 did not support per-Milter
+timeouts, per-Milter error handling, etc. </p>
 
 </ul>
 

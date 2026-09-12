@@ -120,6 +120,10 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
+/*	Amawalk, NY 10501, USA
 /*--*/
 
 /* System library. */
@@ -137,6 +141,8 @@
 /* Global library. */
 
 #include <mail_params.h>
+#include <sasl_mech_filter.h>
+#include <string_list.h>
 
 /* XSASL library. */
 
@@ -149,6 +155,11 @@
 #include "smtpd_chat.h"
 
 #ifdef USE_SASL_AUTH
+
+ /*
+  * SASL mechanism filter.
+  */
+static STRING_LIST *smtpd_sasl_mech_filter;
 
 /*
  * Silly little macros.
@@ -178,6 +189,12 @@ void    smtpd_sasl_initialize(void)
 					     var_smtpd_sasl_path)) == 0)
 	msg_fatal("SASL per-process initialization failed");
 
+    /*
+     * Initialize the SASL mechanism filter.
+     */
+    smtpd_sasl_mech_filter = string_list_init(VAR_SMTPD_SASL_MECH_FILTER,
+					      MATCH_FLAG_NONE,
+					      var_smtpd_sasl_mech_filter);
 }
 
 /* smtpd_sasl_activate - per-connection initialization */
@@ -186,6 +203,7 @@ void    smtpd_sasl_activate(SMTPD_STATE *state, const char *sasl_opts_name,
 			            const char *sasl_opts_val)
 {
     const char *mechanism_list;
+    const char *filtered_mechanism_list;
     XSASL_SERVER_CREATE_ARGS create_args;
     int     tls_flag;
 
@@ -239,7 +257,12 @@ void    smtpd_sasl_activate(SMTPD_STATE *state, const char *sasl_opts_name,
     if ((mechanism_list =
 	 xsasl_server_get_mechanism_list(state->sasl_server)) == 0)
 	msg_fatal("no SASL authentication mechanisms");
-    state->sasl_mechanism_list = mystrdup(mechanism_list);
+    filtered_mechanism_list =
+	sasl_mech_filter(smtpd_sasl_mech_filter, mechanism_list);
+    if (*filtered_mechanism_list == 0)
+	msg_fatal("%s discards all mechanisms in '%s'",
+		  VAR_SMTPD_SASL_MECH_FILTER, mechanism_list);
+    state->sasl_mechanism_list = mystrdup(filtered_mechanism_list);
 }
 
 /* smtpd_sasl_state_init - initialize state to allow extern authentication. */
@@ -321,16 +344,20 @@ int     smtpd_sasl_authenticate(SMTPD_STATE *state,
 	}
     }
     if (status != XSASL_AUTH_DONE) {
-	msg_warn("%s: SASL %s authentication failed: %s",
-		 state->namaddr, sasl_method,
-		 STR(state->sasl_reply));
+	const char *reason = (*STR(state->sasl_reply) ? STR(state->sasl_reply) :
+			      "(reason unavailable)");
+
+	sasl_username = xsasl_server_get_username(state->sasl_server);
+	msg_warn("%s: SASL %.100s authentication failed: %s, sasl_username=%.100s",
+		 state->namaddr, sasl_method, reason,
+		 sasl_username ? sasl_username : "(unavailable)");
 	/* RFC 4954 Section 6. */
 	if (status == XSASL_AUTH_TEMP)
 	    smtpd_chat_reply(state, "454 4.7.0 Temporary authentication failure: %s",
-			     STR(state->sasl_reply));
+			     reason);
 	else
 	    smtpd_chat_reply(state, "535 5.7.8 Error: authentication failed: %s",
-			     STR(state->sasl_reply));
+			     reason);
 	return (-1);
     }
     /* RFC 4954 Section 6. */

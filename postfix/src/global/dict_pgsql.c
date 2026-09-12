@@ -45,80 +45,9 @@
 /*	Must be O_RDONLY.
 /* .IP dict_flags
 /*	See dict_open(3).
-/*
-/* .PP
-/*	Configuration parameters:
-/* .IP user
-/*	Username for connecting to the database.
-/* .IP password
-/*	Password for the above.
-/* .IP dbname
-/*	Name of the database.
-/* .IP query
-/*	Query template. If not defined a default query template is constructed
-/*	from the legacy \fIselect_function\fR or failing that the \fItable\fR,
-/*	\fIselect_field\fR, \fIwhere_field\fR, and \fIadditional_conditions\fR
-/*	parameters. Before the query is issues, variable substitutions are
-/*	performed. See pgsql_table(5).
-/* .IP domain
-/*	List of domains the queries should be restricted to.  If
-/*	specified, only FQDN addresses whose domain parts matching this
-/*	list will be queried against the SQL database.  Lookups for
-/*	partial addresses are also suppressed.  This can significantly
-/*	reduce the query load on the server.
-/* .IP result_format
-/*	The format used to expand results from queries.  Substitutions
-/*	are performed as described in pgsql_table(5). Defaults to returning
-/*	the lookup result unchanged.
-/* .IP expansion_limit
-/*	Limit (if any) on the total number of lookup result values. Lookups which
-/*	exceed the limit fail with dict->error=DICT_ERR_RETRY. Note that each
-/*	non-empty (and non-NULL) column of a multi-column result row counts as
-/*	one result.
-/* .IP select_function
-/*	When \fIquery\fR is not defined, the function to be used instead of
-/*	the default query based on the legacy \fItable\fR, \fIselect_field\fR,
-/*	\fIwhere_field\fR, and \fIadditional_conditions\fR parameters.
-/* .IP table
-/*	When \fIquery\fR and \fIselect_function\fR are not defined, the name of the
-/*	FROM table used to construct the default query template, see pgsql_table(5).
-/* .IP select_field
-/*	When \fIquery\fR and \fIselect_function\fR are not defined, the name of the
-/*	SELECT field used to construct the default query template, see pgsql_table(5).
-/* .IP where_field
-/*	When \fIquery\fR and \fIselect_function\fR are not defined, the name of the
-/*	WHERE field used to construct the default query template, see pgsql_table(5).
-/* .IP additional_conditions
-/*	When \fIquery\fR and \fIselect_function\fR are not defined, the name of the
-/*	additional text to add to the WHERE field in the default query template (this
-/*	usually begins with "and") see pgsql_table(5).
-/* .IP hosts
-/*	List of hosts to connect to.
-/* .PP
-/*	For example, if you want the map to reference databases of
-/*	the name "your_db" and execute a query like this: select
-/*	forw_addr from aliases where alias like '<some username>'
-/*	against any database called "postfix_info" located on hosts
-/*	host1.some.domain and host2.some.domain, logging in as user
-/*	"postfix" and password "passwd" then the configuration file
-/*	should read:
-/* .PP
-/*	user = postfix
-/* .br
-/*	password = passwd
-/* .br
-/*	dbname = postfix_info
-/* .br
-/*	table = aliases
-/* .br
-/*	select_field = forw_addr
-/* .br
-/*	where_field = alias
-/* .br
-/*	hosts = host1.some.domain host2.some.domain
-/* .PP
 /* SEE ALSO
 /*	dict(3) generic dictionary manager
+/*	pgsql_table(5) PostgreSQL client configuration
 /* AUTHOR(S)
 /*	Aaron Sethman
 /*	androsyn@ratbox.org
@@ -163,6 +92,7 @@
 #include "myrand.h"
 #include "events.h"
 #include "stringops.h"
+#include "valid_uri_scheme.h"
 
 /* Global library. */
 
@@ -179,18 +109,18 @@
 
 #define TYPEUNIX			(1<<0)
 #define TYPEINET			(1<<1)
-#define TYPECONNSTRING			(1<<2)
+#define TYPECONNSTR			(1<<2)
 
 #define RETRY_CONN_MAX			100
-#define RETRY_CONN_INTV			60	/* 1 minute */
-#define IDLE_CONN_INTV			60	/* 1 minute */
+#define DEF_RETRY_INTV			60	/* 1 minute */
+#define DEF_IDLE_INTV			60	/* 1 minute */
 
 typedef struct {
     PGconn *db;
     char   *hostname;
     char   *name;
     char   *port;
-    unsigned type;			/* TYPEUNIX | TYPEINET | TYPECONNSTRING */
+    unsigned type;			/* TYPEUNIX | TYPEINET | TYPECONNSTR */
     unsigned stat;			/* STATUNTRIED | STATFAIL | STATCUR */
     time_t  ts;				/* used for attempting reconnection */
 } HOST;
@@ -198,6 +128,7 @@ typedef struct {
 typedef struct {
     int     len_hosts;			/* number of hosts */
     HOST  **db_hosts;			/* hosts on which databases reside */
+    char   *non_uri_target;		/* require dbname to be specified */
 } PLPGSQL;
 
 typedef struct {
@@ -210,6 +141,9 @@ typedef struct {
     char   *username;
     char   *password;
     char   *dbname;
+    char   *encoding;
+    int     retry_interval;
+    int     idle_interval;
     char   *table;
     ARGV   *hosts;
     PLPGSQL *pldb;
@@ -222,12 +156,11 @@ typedef struct {
 
 /* internal function declarations */
 static PLPGSQL *plpgsql_init(ARGV *);
-static PGSQL_RES *plpgsql_query(DICT_PGSQL *, const char *, VSTRING *, char *,
-				        char *, char *);
+static PGSQL_RES *plpgsql_query(DICT_PGSQL *, const char *, VSTRING *);
 static void plpgsql_dealloc(PLPGSQL *);
 static void plpgsql_close_host(HOST *);
-static void plpgsql_down_host(HOST *);
-static void plpgsql_connect_single(HOST *, char *, char *, char *);
+static void plpgsql_down_host(HOST *, int);
+static void plpgsql_connect_single(DICT_PGSQL *, HOST *);
 static const char *dict_pgsql_lookup(DICT *, const char *);
 DICT   *dict_pgsql_open(const char *, int, int);
 static void dict_pgsql_close(DICT *);
@@ -258,11 +191,17 @@ static void dict_pgsql_quote(DICT *dict, const char *name, VSTRING *result)
     buflen = 2 * len + 1;
 
     /*
-     * XXX Workaround: stop further processing when PQescapeStringConn()
-     * (below) fails. A more proper fix requires invasive changes, not
-     * suitable for a stable release.
+     * 202604 Claude: error recovery strategy needs clarification.
+     * 
+     * When the PQescapeStringConn() call below fails, we flag the host via
+     * active_host->stat = STATFAIL and return without writing to `result`.
+     * plpgsql_query() examines host->stat immediately after
+     * db_common_expand() returns, calls plpgsql_down_host(), and tries the
+     * next available server (i.e. not already flagged as STATFAIL).
+     * dict_pgsql_lookup() sets dict->error = DICT_ERR_RETRY if all servers
+     * fail.
      */
-    if (active_host->stat == STATFAIL)
+    if (active_host->stat == STATFAIL)		/* Can't happen */
 	return;
 
     /*
@@ -350,7 +289,7 @@ static const char *dict_pgsql_lookup(DICT *dict, const char *name)
      */
 #ifdef SNAPSHOT
     if ((dict->flags & DICT_FLAG_UTF8_ACTIVE) == 0
-	&& !valid_utf8_string(name, strlen(name))) {
+	&& !valid_utf8_stringz(name)) {
 	if (msg_verbose)
 	    msg_info("%s: %s: Skipping lookup of non-UTF-8 key '%s'",
 		     myname, dict_pgsql->parser->name, name);
@@ -394,10 +333,7 @@ static const char *dict_pgsql_lookup(DICT *dict, const char *name)
 	return (0);
 
     /* do the query - set dict->error & cleanup if there's an error */
-    if ((query_res = plpgsql_query(dict_pgsql, name, query,
-				   dict_pgsql->dbname,
-				   dict_pgsql->username,
-				   dict_pgsql->password)) == 0) {
+    if ((query_res = plpgsql_query(dict_pgsql, name, query)) == 0) {
 	dict->error = DICT_ERR_RETRY;
 	return 0;
     }
@@ -473,8 +409,7 @@ static HOST *dict_pgsql_find_host(PLPGSQL *PLDB, unsigned stat, unsigned type)
 
 /* dict_pgsql_get_active - get an active connection */
 
-static HOST *dict_pgsql_get_active(PLPGSQL *PLDB, char *dbname,
-				           char *username, char *password)
+static HOST *dict_pgsql_get_active(DICT_PGSQL *dict_pgsql, PLPGSQL *PLDB)
 {
     const char *myname = "dict_pgsql_get_active";
     HOST   *host;
@@ -483,7 +418,7 @@ static HOST *dict_pgsql_get_active(PLPGSQL *PLDB, char *dbname,
     /* try the active connections first; prefer the ones to UNIX sockets */
     if ((host = dict_pgsql_find_host(PLDB, STATACTIVE, TYPEUNIX)) != NULL ||
 	(host = dict_pgsql_find_host(PLDB, STATACTIVE, TYPEINET)) != NULL ||
-	(host = dict_pgsql_find_host(PLDB, STATACTIVE, TYPECONNSTRING)) != NULL) {
+     (host = dict_pgsql_find_host(PLDB, STATACTIVE, TYPECONNSTR)) != NULL) {
 	if (msg_verbose)
 	    msg_info("%s: found active connection to host %s", myname,
 		     host->hostname);
@@ -501,11 +436,11 @@ static HOST *dict_pgsql_get_active(PLPGSQL *PLDB, char *dbname,
 	    (host = dict_pgsql_find_host(PLDB, STATUNTRIED | STATFAIL,
 					 TYPEINET)) != NULL ||
 	    (host = dict_pgsql_find_host(PLDB, STATUNTRIED | STATFAIL,
-					 TYPECONNSTRING)) != NULL)) {
+					 TYPECONNSTR)) != NULL)) {
 	if (msg_verbose)
 	    msg_info("%s: attempting to connect to host %s", myname,
 		     host->hostname);
-	plpgsql_connect_single(host, dbname, username, password);
+	plpgsql_connect_single(dict_pgsql, host);
 	if (host->stat == STATACTIVE)
 	    return host;
     }
@@ -533,17 +468,14 @@ static void dict_pgsql_event(int unused_event, void *context)
 
 static PGSQL_RES *plpgsql_query(DICT_PGSQL *dict_pgsql,
 				        const char *name,
-				        VSTRING *query,
-				        char *dbname,
-				        char *username,
-				        char *password)
+				        VSTRING *query)
 {
     PLPGSQL *PLDB = dict_pgsql->pldb;
     HOST   *host;
     PGSQL_RES *res = 0;
     ExecStatusType status;
 
-    while ((host = dict_pgsql_get_active(PLDB, dbname, username, password)) != NULL) {
+    while ((host = dict_pgsql_get_active(dict_pgsql, PLDB)) != NULL) {
 
 	/*
 	 * The active host is used to escape strings in the context of the
@@ -558,7 +490,7 @@ static PGSQL_RES *plpgsql_query(DICT_PGSQL *dict_pgsql,
 
 	/* Check for potential dict_pgsql_quote() failure. */
 	if (host->stat == STATFAIL) {
-	    plpgsql_down_host(host);
+	    plpgsql_down_host(host, dict_pgsql->retry_interval);
 	    continue;
 	}
 
@@ -596,7 +528,7 @@ static PGSQL_RES *plpgsql_query(DICT_PGSQL *dict_pgsql,
 		    msg_info("dict_pgsql: successful query from host %s",
 			     host->hostname);
 		event_request_timer(dict_pgsql_event, (void *) host,
-				    IDLE_CONN_INTV);
+				    dict_pgsql->idle_interval);
 		return (res);
 	    case PGRES_FATAL_ERROR:
 		msg_warn("pgsql query failed: fatal error from host %s: %s",
@@ -627,7 +559,7 @@ static PGSQL_RES *plpgsql_query(DICT_PGSQL *dict_pgsql,
 	 */
 	if (res != 0)
 	    PQclear(res);
-	plpgsql_down_host(host);
+	plpgsql_down_host(host, dict_pgsql->retry_interval);
     }
 
     return (0);
@@ -638,48 +570,32 @@ static PGSQL_RES *plpgsql_query(DICT_PGSQL *dict_pgsql,
  * used to reconnect to a single database when one is down or none is
  * connected yet. Log all errors and set the stat field of host accordingly
  */
-static void plpgsql_connect_single(HOST *host, char *dbname, char *username, char *password)
+static void plpgsql_connect_single(DICT_PGSQL *dict_pgsql, HOST *host)
 {
-    if (host->type == TYPECONNSTRING) {
+    if (host->type == TYPECONNSTR) {
 	host->db = PQconnectdb(host->name);
     } else {
 	host->db = PQsetdbLogin(host->name, host->port, NULL, NULL,
-				dbname, username, password);
+				dict_pgsql->dbname, dict_pgsql->username,
+				dict_pgsql->password);
     }
     if (host->db == NULL || PQstatus(host->db) != CONNECTION_OK) {
+	/* 202604 Claude: don't call PQerrorMessage(NULL). */
 	msg_warn("connect to pgsql server %s: %s",
-		 host->hostname, PQerrorMessage(host->db));
-	plpgsql_down_host(host);
+		 host->hostname, host->db ? PQerrorMessage(host->db) :
+		 "PQconnectdb or PQsetdbLogin failed");
+	plpgsql_down_host(host, dict_pgsql->retry_interval);
+	return;
+    }
+    if (PQsetClientEncoding(host->db, dict_pgsql->encoding) != 0) {
+	msg_warn("dict_pgsql: cannot set the encoding to %s, skipping %s",
+		 dict_pgsql->encoding, host->hostname);
+	plpgsql_down_host(host, dict_pgsql->retry_interval);
 	return;
     }
     if (msg_verbose)
 	msg_info("dict_pgsql: successful connection to host %s",
 		 host->hostname);
-
-    /*
-     * The only legitimate encodings for Internet mail are ASCII and UTF-8.
-     */
-#ifdef SNAPSHOT
-    if (PQsetClientEncoding(host->db, "UTF8") != 0) {
-	msg_warn("dict_pgsql: cannot set the encoding to UTF8, skipping %s",
-		 host->hostname);
-	plpgsql_down_host(host);
-	return;
-    }
-#else
-
-    /*
-     * XXX Postfix does not send multi-byte characters. The following piece
-     * of code is an explicit statement of this fact, and the database server
-     * should not accept multi-byte information after this point.
-     */
-    if (PQsetClientEncoding(host->db, "LATIN1") != 0) {
-	msg_warn("dict_pgsql: cannot set the encoding to LATIN1, skipping %s",
-		 host->hostname);
-	plpgsql_down_host(host);
-	return;
-    }
-#endif
     /* Success. */
     host->stat = STATACTIVE;
 }
@@ -698,12 +614,12 @@ static void plpgsql_close_host(HOST *host)
  * plpgsql_down_host - close a failed connection AND set a "stay away from
  * this host" timer.
  */
-static void plpgsql_down_host(HOST *host)
+static void plpgsql_down_host(HOST *host, int retry_interval)
 {
     if (host->db)
 	PQfinish(host->db);
     host->db = 0;
-    host->ts = time((time_t *) 0) + RETRY_CONN_INTV;
+    host->ts = time((time_t *) 0) + retry_interval;
     host->stat = STATFAIL;
     event_cancel_timer(dict_pgsql_event, (void *) host);
 }
@@ -720,7 +636,12 @@ static void pgsql_parse_config(DICT_PGSQL *dict_pgsql, const char *pgsqlcf)
 
     dict_pgsql->username = cfg_get_str(p, "user", "", 0, 0);
     dict_pgsql->password = cfg_get_str(p, "password", "", 0, 0);
-    dict_pgsql->dbname = cfg_get_str(p, "dbname", "", 1, 0);
+    dict_pgsql->dbname = cfg_get_str(p, "dbname", "", 0, 0);
+    dict_pgsql->encoding = cfg_get_str(p, "encoding", "UTF8", 1, 0);
+    dict_pgsql->retry_interval = cfg_get_int(p, "retry_interval",
+					     DEF_RETRY_INTV, 1, 0);
+    dict_pgsql->idle_interval = cfg_get_int(p, "idle_interval",
+					    DEF_IDLE_INTV, 1, 0);
     dict_pgsql->result_format = cfg_get_str(p, "result_format", "%s", 1, 0);
 
     /*
@@ -776,6 +697,9 @@ static void pgsql_parse_config(DICT_PGSQL *dict_pgsql, const char *pgsqlcf)
 	    msg_info("%s: %s: no hostnames specified, defaulting to '%s'",
 		     myname, pgsqlcf, dict_pgsql->hosts->argv[0]);
     }
+    /* Don't blacklist the load balancer! */
+    if (dict_pgsql->hosts->argc == 1)
+	argv_add(dict_pgsql->hosts, dict_pgsql->hosts->argv[0], (char *) 0);
     myfree(hosts);
 }
 
@@ -812,8 +736,23 @@ DICT   *dict_pgsql_open(const char *name, int open_flags, int dict_flags)
     dict_pgsql->pldb = plpgsql_init(dict_pgsql->hosts);
     if (dict_pgsql->pldb == NULL)
 	msg_fatal("couldn't initialize pldb!\n");
+    if (msg_verbose && dict_pgsql->pldb->non_uri_target == 0
+	&& dict_pgsql->dbname[0] != 0)
+	msg_info("%s:%s table ignores 'dbname' field -- "
+		 "all 'hosts' targets are URIs",
+		 DICT_TYPE_PGSQL, name);
+    if (dict_pgsql->pldb->non_uri_target && dict_pgsql->dbname[0] == 0) {
+	DICT   *ret;
+
+	ret = dict_surrogate(DICT_TYPE_PGSQL, name, open_flags, dict_flags,
+			   "%s:%s host target '%s' requires dbname setting",
+			     DICT_TYPE_PGSQL, name,
+			     dict_pgsql->pldb->non_uri_target);
+	dict_pgsql_close(&dict_pgsql->dict);
+	return (ret);
+    }
     dict_pgsql->dict.owner = cfg_get_owner(dict_pgsql->parser);
-    return (DICT_DEBUG (&dict_pgsql->dict));
+    return (&dict_pgsql->dict);
 }
 
 /* plpgsql_init - initialize a PGSQL database */
@@ -826,8 +765,12 @@ static PLPGSQL *plpgsql_init(ARGV *hosts)
     PLDB = (PLPGSQL *) mymalloc(sizeof(PLPGSQL));
     PLDB->len_hosts = hosts->argc;
     PLDB->db_hosts = (HOST **) mymalloc(sizeof(HOST *) * hosts->argc);
-    for (i = 0; i < hosts->argc; i++)
+    PLDB->non_uri_target = 0;
+    for (i = 0; i < hosts->argc; i++) {
 	PLDB->db_hosts[i] = host_init(hosts->argv[i]);
+	if (PLDB->db_hosts[i]->type != TYPECONNSTR)
+	    PLDB->non_uri_target = PLDB->db_hosts[i]->name;
+    }
 
     return PLDB;
 }
@@ -847,10 +790,10 @@ static HOST *host_init(const char *hostname)
     host->ts = 0;
 
     /*
-     * Modern syntax: "postgresql://connection-info".
+     * Modern syntax: connection URI.
      */
-    if (strncmp(d, "postgresql:", 11) == 0) {
-	host->type = TYPECONNSTRING;
+    if (valid_uri_scheme(d)) {
+	host->type = TYPECONNSTR;
 	host->name = mystrdup(d);
 	host->port = 0;
     }
@@ -892,6 +835,7 @@ static void dict_pgsql_close(DICT *dict)
     myfree(dict_pgsql->username);
     myfree(dict_pgsql->password);
     myfree(dict_pgsql->dbname);
+    myfree(dict_pgsql->encoding);
     myfree(dict_pgsql->query);
     myfree(dict_pgsql->result_format);
     if (dict_pgsql->hosts)

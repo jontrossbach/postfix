@@ -49,11 +49,9 @@
 /*
 /*	This feature is available with Postfix version 2.4 and later.
 /* .IP "\fB-j\fR"
-/*	Produce a queue listing in JSON format, based on output
-/*	from the showq(8) daemon.  The result is a stream of zero
-/*	or more JSON objects, one per queue file.  Each object is
-/*	followed by a newline character to support simple streaming
-/*	parsers. See "\fBJSON OBJECT FORMAT\fR" below for details.
+/*	Produce a queue listing in JSON LINES format, based on
+/*	output from the showq(8) daemon. See "\fBJSON OBJECT
+/*	FORMAT\fR" below for details.
 /*
 /*	This feature is available in Postfix 3.1 and later.
 /* .IP \fB-p\fR
@@ -64,8 +62,12 @@
 /*	Each queue entry shows the queue file ID, message
 /*	size, arrival time, sender, and the recipients that still need to
 /*	be delivered.  If mail could not be delivered upon the last attempt,
-/*	the reason for failure is shown. The queue ID string
-/*	is followed by an optional status character:
+/*	the reason for failure is shown. With Postfix >= 3.11, the output
+/*	may also show bounced recipients that are pending the creation
+/*	of a non-delivery status notification message that will be
+/*	returned to the sender.
+/*
+/*	The queue ID string is followed by an optional status character:
 /* .RS
 /* .IP \fB*\fR
 /*	The message is in the \fBactive\fR queue, i.e. the message is
@@ -121,11 +123,9 @@
 /*	number does not include message envelope information. It
 /*	is approximately equal to the number of bytes that would
 /*	be transmitted via SMTP including the <CR><LF> line endings.
-/* .IP \fBforced_expire\fR
+/* .IP "\fBforced_expire\fR (Postfix >= 3.5)
 /*	The message is forced to expire (\fBtrue\fR or \fBfalse\fR).
 /*	See the \fBpostsuper\fR(1) options \fB-e\fR or \fB-f\fR.
-/* .sp
-/*	This feature is available in Postfix 3.5 and later.
 /* .IP \fBsender\fR
 /*	The envelope sender address.
 /* .IP \fBrecipients\fR
@@ -133,11 +133,17 @@
 /* .RS
 /* .IP \fBaddress\fR
 /*	One recipient address.
+/* .IP "\fBorig_address\fR (Postfix >= 3.11)"
+/*	One original recipient address.
 /* .IP \fBdelay_reason\fR
 /*	If present, the reason for delayed delivery.  Delayed
 /*	recipients may have no delay reason, for example, while
 /*	delivery is in progress, or after the system was stopped
 /*	before it could record the reason.
+/* .IP "\fBbounce_reason\fR (Postfix >= 3.11)"
+/*	If present, the reason why this recipient was bounced. The
+/*	recipient is still pending the creation of a non-delivery status
+/*	notification message that will be returned to the sender.
 /* .RE
 /* SECURITY
 /* .ad
@@ -154,12 +160,13 @@
 /* .fi
 /* .IP MAIL_CONFIG
 /*	Directory with the \fBmain.cf\fR file. In order to avoid exploitation
-/*	of set-group ID privileges, a non-standard directory is allowed only
+/*	of set-group ID privileges, a non-default directory is allowed only
 /*	if:
 /* .RS
 /* .IP \(bu
-/*	The name is listed in the standard \fBmain.cf\fR file with the
-/*	\fBalternate_config_directories\fR configuration parameter.
+/*	The name is listed in the default \fBmain.cf\fR file with the
+/*	\fBalternate_config_directories\fR or
+/*	\fBmulti_instance_directories\fR configuration parameter.
 /* .IP \(bu
 /*	The command is invoked by the super-user.
 /* .RE
@@ -184,7 +191,7 @@
 /*	Optional list of destinations that are eligible for per-destination
 /*	logfiles with mail that is queued to those destinations.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
@@ -341,6 +348,26 @@ static const CONFIG_STR_TABLE str_table[] = {
     0,
 };
 
+/* showq_client - run the appropriate showq protocol client */
+
+static void showq_client(int mode, VSTREAM *showq)
+{
+    if (attr_scan(showq, ATTR_FLAG_STRICT,
+		  RECV_ATTR_STREQ(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_SHOWQ),
+		  ATTR_TYPE_END) != 0)
+	msg_fatal_status(EX_SOFTWARE, "malformed showq server response");
+    switch (mode) {
+    case PQ_MODE_MAILQ_LIST:
+	showq_compat(showq);
+	break;
+    case PQ_MODE_JSON_LIST:
+	showq_json(showq);
+	break;
+    default:
+	msg_panic("show_queue: unknown mode %d", mode);
+    }
+}
+
 /* show_queue - show queue status */
 
 static void show_queue(int mode)
@@ -361,16 +388,7 @@ static void show_queue(int mode)
      * Connect to the show queue service.
      */
     if ((showq = mail_connect(MAIL_CLASS_PUBLIC, var_showq_service, BLOCKING)) != 0) {
-	switch (mode) {
-	case PQ_MODE_MAILQ_LIST:
-	    showq_compat(showq);
-	    break;
-	case PQ_MODE_JSON_LIST:
-	    showq_json(showq);
-	    break;
-	default:
-	    msg_panic("show_queue: unknown mode %d", mode);
-	}
+	showq_client(mode, showq);
 	if (vstream_fclose(showq))
 	    msg_warn("close: %m");
     }
@@ -379,7 +397,7 @@ static void show_queue(int mode)
      * Don't assume that the mail system is down when the user has
      * insufficient permission to access the showq socket.
      */
-    else if (errno == EACCES) {
+    else if (errno == EACCES || errno == EPERM) {
 	msg_fatal_status(EX_SOFTWARE,
 			 "Connect to the %s %s service: %m",
 			 var_mail_name, var_showq_service);
@@ -394,7 +412,9 @@ static void show_queue(int mode)
 	ARGV   *argv;
 	int     stat;
 
-	msg_warn("Mail system is down -- accessing queue directly");
+	msg_warn("Mail system is down -- accessing queue directly"
+		 " (Connect to the %s %s service: %m)",
+		 var_mail_name, var_showq_service);
 	showq_path = concatenate(var_daemon_dir, "/", var_showq_service,
 				 (char *) 0);
 	argv = argv_alloc(6);
@@ -407,19 +427,11 @@ static void show_queue(int mode)
 				   CA_VSTREAM_POPEN_END)) == 0) {
 	    stat = -1;
 	} else {
-	    switch (mode) {
-	    case PQ_MODE_MAILQ_LIST:
-		showq_compat(showq);
-		break;
-	    case PQ_MODE_JSON_LIST:
-		showq_json(showq);
-		break;
-	    default:
-		msg_panic("show_queue: unknown mode %d", mode);
-	    }
+	    showq_client(mode, showq);
 	    stat = vstream_pclose(showq);
 	}
 	argv_free(argv);
+	/* 202606 Qualys+Mythos: don't free() text before logging. */
 	if (stat != 0)
 	    msg_fatal_status(stat < 0 ? EX_OSERR : EX_SOFTWARE,
 			     "Error running %s", showq_path);
@@ -434,7 +446,9 @@ static void show_queue(int mode)
      */
     else {
 	msg_fatal_status(EX_UNAVAILABLE,
-			 "Queue report unavailable - mail system is down");
+			 "Queue report unavailable - mail system is down"
+			 " (Connect to the %s %s service: %m)",
+			 var_mail_name, var_showq_service);
     }
 }
 

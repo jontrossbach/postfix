@@ -59,6 +59,14 @@
 /*	int	mask;
 /*	int	flags;
 /*
+/*	const char *str_name_mask_delim_opt(
+/*	VSTRING	*buf,
+/*	const char *context,
+/*	const NAME_MASK *table,
+/*	int	mask,
+/*	const char *delim,
+/*	int	flags)
+/*
 /*	const char *str_long_name_mask_opt(buf, context, table, mask, flags)
 /*	VSTRING	*buf;
 /*	const char *context;
@@ -72,7 +80,7 @@
 /*	comma and/or whitespace characters. The "long_" version returns
 /*	a "long int" bitmask, rather than an "int" bitmask.
 /*
-/*	str_name_mask() translates a mask into its equlvalent names.
+/*	str_name_mask() translates a mask into its equivalent names.
 /*	The result is written to a static buffer that is overwritten
 /*	upon each call. The "long_" version converts a "long int"
 /*	bitmask, rather than an "int" bitmask.
@@ -96,7 +104,10 @@
 /* .IP mask
 /*	A bit mask.
 /* .IP delim
-/*	Delimiter characters to use instead of whitespace and commas.
+/*	When converting from string to mask, the set of delimiter
+/*	characters to use instead of whitespace and commas. When
+/*	converting from mask to string, the delimiter string to use
+/*	instead what may be specified with flags.
 /* .IP flags
 /*	Bit-wise OR of one or more of the following.  Where features
 /*	would have conflicting results (e.g., FATAL versus IGNORE),
@@ -156,6 +167,9 @@
 /*	Enable case-insensitive matching.
 /*	This feature is not enabled by default when calling name_mask();
 /*	it has no effect with str_name_mask().
+/* .IP NAME_MASK_NULL
+/*	When converting from mask to string, output "0" when the
+/*	input mask is empty.
 /* .IP NAME_MASK_COMMA
 /*	Use comma instead of space when converting a mask to string.
 /* .IP NAME_MASK_PIPE
@@ -260,18 +274,17 @@ int     name_mask_delim_opt(const char *context, const NAME_MASK *table,
     return (result);
 }
 
-/* str_name_mask_opt - mask to string */
+/* str_name_mask_delim_opt - mask to string */
 
-const char *str_name_mask_opt(VSTRING *buf, const char *context,
-			              const NAME_MASK *table,
-			              int mask, int flags)
+const char *str_name_mask_delim_opt(VSTRING *buf, const char *context,
+				            const NAME_MASK *table,
+				            int mask, const char *delim,
+				            int flags)
 {
-    const char *myname = "name_mask";
+    const char *myname = "str_name_mask";
     const NAME_MASK *np;
     ssize_t len;
     static VSTRING *my_buf = 0;
-    int     delim = (flags & NAME_MASK_COMMA ? ',' :
-		     (flags & NAME_MASK_PIPE ? '|' : ' '));
 
     if ((flags & STR_NAME_MASK_REQUIRED) == 0)
 	msg_panic("%s: missing NAME_MASK_NUMBER/FATAL/RETURN/WARN/IGNORE flag",
@@ -287,7 +300,7 @@ const char *str_name_mask_opt(VSTRING *buf, const char *context,
     for (np = table; mask != 0; np++) {
 	if (np->name == 0) {
 	    if (flags & NAME_MASK_NUMBER) {
-		vstring_sprintf_append(buf, "0x%x%c", mask, delim);
+		vstring_sprintf_append(buf, "0x%x%s", mask, delim);
 	    } else if (flags & NAME_MASK_FATAL) {
 		msg_fatal("%s: unknown %s bit in mask: 0x%x",
 			  myname, context, mask);
@@ -303,20 +316,34 @@ const char *str_name_mask_opt(VSTRING *buf, const char *context,
 	}
 	if (mask & np->mask) {
 	    mask &= ~np->mask;
-	    vstring_sprintf_append(buf, "%s%c", np->name, delim);
+	    vstring_sprintf_append(buf, "%s%s", np->name, delim);
 	}
     }
     if ((len = VSTRING_LEN(buf)) > 0)
-	vstring_truncate(buf, len - 1);
+	vstring_truncate(buf, len - strlen(delim));
+    else if (flags & NAME_MASK_NULL)
+	vstring_strcat(buf, "0");
     VSTRING_TERMINATE(buf);
 
     return (STR(buf));
 }
 
+/* str_name_mask_opt - mask to string */
+
+const char *str_name_mask_opt(VSTRING *buf, const char *context,
+			              const NAME_MASK *table,
+			              int mask, int flags)
+{
+    const char *delim = (flags & NAME_MASK_COMMA ? "," :
+			 (flags & NAME_MASK_PIPE ? "|" : " "));
+
+    return (str_name_mask_delim_opt(buf, context, table, mask, delim, flags));
+}
+
 /* long_name_mask_delim_opt - compute mask corresponding to list of names */
 
 long    long_name_mask_delim_opt(const char *context,
-				         const LONG_NAME_MASK * table,
+				         const LONG_NAME_MASK *table,
 			               const char *names, const char *delim,
 				         int flags)
 {
@@ -378,7 +405,7 @@ long    long_name_mask_delim_opt(const char *context,
 /* str_long_name_mask_opt - mask to string */
 
 const char *str_long_name_mask_opt(VSTRING *buf, const char *context,
-				           const LONG_NAME_MASK * table,
+				           const LONG_NAME_MASK *table,
 				           long mask, int flags)
 {
     const char *myname = "name_mask";
@@ -423,6 +450,8 @@ const char *str_long_name_mask_opt(VSTRING *buf, const char *context,
     }
     if ((len = VSTRING_LEN(buf)) > 0)
 	vstring_truncate(buf, len - 1);
+    else if (flags & NAME_MASK_NULL)
+	vstring_strcat(buf, "0");
     VSTRING_TERMINATE(buf);
 
     return (STR(buf));

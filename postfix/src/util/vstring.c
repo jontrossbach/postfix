@@ -127,6 +127,8 @@
 /*	The functions and macros in this module implement arbitrary-length
 /*	strings and common operations on those strings. The strings do not
 /*	need to be null terminated and may contain arbitrary binary data.
+/*	Operations that expect a null-terminated string as input will
+/*	process only the input that precedes the first null byte.
 /*	The strings manage their own memory and grow automatically when full.
 /*	The optional string null terminator does not add to the string length.
 /*
@@ -142,7 +144,7 @@
 /*	Specifies a hard upper limit on a string's length. When the
 /*	length would be exceeded, the program simulates a memory
 /*	allocation problem (i.e. it terminates through msg_fatal()).
-/*	This fuctionality is currently unimplemented.
+/*	This functionality is currently unimplemented.
 /* .IP "CA_VSTRING_CTL_EXACT (no argument)"
 /*	Allocate the requested amounts, instead of rounding up.
 /*	This should be used for tests only.
@@ -515,6 +517,7 @@ VSTRING *vstring_memcpy(VSTRING *vp, const char *src, ssize_t len)
 
 VSTRING *vstring_memcat(VSTRING *vp, const char *src, ssize_t len)
 {
+    /* VSTRING_SPACE() does not return if the buffer size would wrap around. */
     VSTRING_SPACE(vp, len);
     memcpy(vstring_end(vp), src, len);
     len += VSTRING_LEN(vp);
@@ -609,7 +612,8 @@ VSTRING *vstring_import(char *str)
     vp->vbuf.flags = 0;
     vp->vbuf.len = 0;
     vp->vbuf.data = (unsigned char *) str;
-    vp->vbuf.len = len + 1;
+    /* 202606 Qualys+Mythos: do not count the null terminator. */
+    vp->vbuf.len = len;
     VSTRING_AT_OFFSET(vp, len);
     vp->vbuf.get_ready = vstring_buf_get_ready;
     vp->vbuf.put_ready = vstring_buf_put_ready;

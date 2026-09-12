@@ -23,15 +23,16 @@ line as one record. If no \fItext\fR is specified on the command
 line, \fBpostlog\fR(1) reads from standard input and logs each input
 line as one record.
 
-By default, logging is sent to \fBsyslogd\fR(8) or
-\fBpostlogd\fR(8); when the
-standard error stream is connected to a terminal, logging
-is sent there as well.
+Logging is sent to \fBsyslogd\fR(8) or \fBpostlogd\fR(8), and
+to the standard error stream (with Postfix < 3.8, \fBpostlog\fR(1)
+writes to the standard error stream only if that stream is
+connected to a terminal).
 
 The following options are implemented:
 .IP "\fB\-c \fIconfig_dir\fR"
-Read the \fBmain.cf\fR configuration file in the named directory
-instead of the default configuration directory.
+The \fBmain.cf\fR configuration file is in the named directory
+instead of the default configuration directory. See also the
+MAIL_CONFIG environment setting below.
 .IP "\fB\-i\fR (obsolete)"
 Include the process ID in the logging tag. This flag is ignored as
 of Postfix 3.4, where the PID is always included.
@@ -48,13 +49,33 @@ is used when none is specified.
 .IP \fB\-v\fR
 Enable verbose logging for debugging purposes. Multiple \fB\-v\fR
 options make the software increasingly verbose.
+.SH "SECURITY"
+.na
+.nf
+.ad
+.fi
+The \fBpostlog\fR(1) command is designed to run with
+set\-groupid privileges, so that it can connect to the
+\fBpostlogd\fR(8) daemon process (Postfix 3.7 and later;
+earlier implementations of this command must not have
+set\-groupid or set\-userid permissions).
 .SH "ENVIRONMENT"
 .na
 .nf
 .ad
 .fi
 .IP MAIL_CONFIG
-Directory with the \fBmain.cf\fR file.
+Directory with the \fBmain.cf\fR file. In order to avoid exploitation
+of set\-group ID privileges, a non\-default directory is allowed only
+if:
+.RS
+.IP \(bu
+The name is listed in the default \fBmain.cf\fR file with the
+\fBalternate_config_directories\fR or
+\fBmulti_instance_directories\fR configuration parameter.
+.IP \(bu
+The command is invoked by the super\-user.
+.RE
 .SH "CONFIGURATION PARAMETERS"
 .na
 .nf
@@ -69,7 +90,7 @@ The text below provides only a parameter summary. See
 The default location of the Postfix main.cf and master.cf
 configuration files.
 .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-The list of environment parameters that a privileged Postfix
+The list of environment variables that a privileged Postfix
 process will import from a non\-Postfix parent process, or name=value
 environment overrides.
 .IP "\fBsyslog_facility (mail)\fR"
@@ -84,6 +105,12 @@ The name of an optional logfile that is written by the Postfix
 \fBpostlogd\fR(8) service.
 .IP "\fBpostlog_service_name (postlog)\fR"
 The name of the \fBpostlogd\fR(8) service entry in master.cf.
+.PP
+Available in Postfix 3.9 and later:
+.IP "\fBmaillog_file_permissions (0600)\fR"
+The file access permissions that will be set when the file
+$maillog_file is created for the first time, or when the file is
+created after an existing file is rotated.
 .SH "SEE ALSO"
 .na
 .nf
@@ -96,6 +123,11 @@ syslogd(8), system logging
 .ad
 .fi
 The Secure Mailer license must be distributed with this software.
+.SH HISTORY
+.ad
+.fi
+The \fBpostlog\fR(1) command was introduced with Postfix
+version 3.4.
 .SH "AUTHOR(S)"
 .na
 .nf

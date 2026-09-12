@@ -51,12 +51,18 @@
 /*	(complete recipient address), \fB$extension\fR (recipient address
 /*	extension), \fB$domain\fR (recipient domain), \fB$local\fR
 /*	(entire recipient address localpart) and
-/*	\fB$recipient_delimiter.\fR The forms \fI${name?value}\fR and
-/*	\fI${name:value}\fR expand conditionally to \fIvalue\fR when
-/*	\fI$name\fR is (is not) defined.
-/*	Characters that may have special meaning to the shell or file system
-/*	are replaced by underscores.  The list of acceptable characters
-/*	is specified with the \fBforward_expansion_filter\fR configuration
+/*	\fB$recipient_delimiter.\fR The forms \fI${name?value}\fR
+/*	and \fI${name?{value}}\fR (Postfix 3.0 and later) expand
+/*	conditionally to \fIvalue\fR when \fI$name\fR is defined,
+/*	and the forms \fI${name:value}\fR \fI${name:{value}}\fR
+/*	(Postfix 3.0 and later) expand conditionally to \fIvalue\fR
+/*	when \fI$name\fR is not defined.  The form
+/*	\fI${name?{value1}:{value2}}\fR (Postfix 3.0 and later)
+/*	expands conditionally to \fIvalue1\fR when \fI$name\fR is
+/*	defined, or \fIvalue2\fR otherwise. Characters that may
+/*	have special meaning to the shell or file system are replaced
+/*	with underscores. The list of acceptable characters is
+/*	specified with the \fBforward_expansion_filter\fR configuration
 /*	parameter.
 /*
 /*	An alias or ~/.\fBforward\fR file may list any combination of external
@@ -164,13 +170,18 @@
 /*	address), \fB$extension\fR (recipient address extension),
 /*	\fB$domain\fR (recipient domain), \fB$local\fR (entire
 /*	recipient address localpart) and \fB$recipient_delimiter.\fR
-/*	The forms \fI${name?value}\fR and \fI${name:value}\fR expand
-/*	conditionally to \fIvalue\fR when \fI$name\fR is (is not)
-/*	defined.  Characters that may have special meaning to the
-/*	shell or file system are replaced by underscores.  The list
-/*	of acceptable characters is specified with the
-/*	\fBexecution_directory_expansion_filter\fR configuration
-/*	parameter.
+/*	The forms \fI${name?value}\fR and \fI${name?{value}}\fR
+/*	(Postfix 3.0 and later) expand conditionally to \fIvalue\fR
+/*	when \fI$name\fR is defined, and the forms \fI${name:value}\fR
+/*	and \fI${name:{value}}\fR (Postfix 3.0 and later) expand
+/*	conditionally to \fIvalue\fR when \fI$name\fR is not defined.
+/*	The form \fI${name?{value1}:{value2}}\fR (Postfix 3.0 and
+/*	later) expands conditionally to \fIvalue1\fR when \fI$name\fR
+/*	is defined, or \fIvalue2\fR otherwise. Characters that may
+/*	have special meaning to the shell or file system are replaced
+/*	with underscores. The list of acceptable characters
+/*	is specified with the \fBexecution_directory_expansion_filter\fR
+/*	configuration parameter.
 /*
 /*	The command is executed directly where possible. Assistance by the
 /*	shell (\fB/bin/sh\fR on UNIX systems) is used only when the command
@@ -192,31 +203,34 @@
 /*
 /*	A limited amount of message context is exported via environment
 /*	variables. Characters that may have special meaning to the shell
-/*	are replaced by underscores.  The list of acceptable characters
+/*	are replaced with underscores.  The list of acceptable characters
 /*	is specified with the \fBcommand_expansion_filter\fR configuration
 /*	parameter.
 /* .IP \fBSHELL\fR
-/*	The recipient user's login shell.
+/*	The envelope recipient user's login shell.
 /* .IP \fBHOME\fR
-/*	The recipient user's home directory.
+/*	The envelope recipient user's home directory.
 /* .IP \fBUSER\fR
-/*	The bare recipient name.
+/*	The bare envelope recipient name.
 /* .IP \fBEXTENSION\fR
-/*	The optional recipient address extension.
+/*	The optional envelope recipient address extension.
 /* .IP \fBDOMAIN\fR
-/*	The recipient address domain part.
+/*	The envelope recipient address domain part.
 /* .IP \fBLOGNAME\fR
-/*	The bare recipient name.
+/*	The bare envelope recipient name.
 /* .IP \fBLOCAL\fR
-/*	The entire recipient address localpart (text to the left of the
-/*	rightmost @ character).
+/*	The entire envelope recipient address localpart (text to
+/*	the left of the rightmost @ character).
 /* .IP \fBORIGINAL_RECIPIENT\fR
-/*	The entire recipient address, before any address rewriting
-/*	or aliasing (Postfix 2.5 and later).
+/*	The entire envelope recipient address, before any address
+/*	rewriting or aliasing (Postfix 2.5 and later).
 /* .IP \fBRECIPIENT\fR
-/*	The entire recipient address.
+/*	The entire envelope recipient address.
 /* .IP \fBSENDER\fR
-/*	The entire sender address.
+/*	The entire envelope sender address.
+/* .IP \fBENVID\fR
+/*	The optional RFC 3461 envelope ID. Available as of Postfix
+/*	3.9.
 /* .PP
 /*	Additional remote client information is made available via
 /*	the following environment variables:
@@ -402,7 +416,11 @@
 /*	home_mailbox, mail_spool_directory, fallback_transport_maps,
 /*	fallback_transport, and luser_relay.
 /* .IP "\fBalias_maps (see 'postconf -d' output)\fR"
-/*	The alias databases that are used for \fBlocal\fR(8) delivery.
+/*	Optional lookup tables that are searched only with an email address
+/*	localpart (no domain) and that apply only to \fBlocal\fR(8) recipients;
+/*	this is unlike virtual_alias_maps that are often searched with a
+/*	full email address (including domain) and that apply to all recipients:
+/*	\fBlocal\fR(8), virtual, and remote.
 /* .IP "\fBforward_path (see 'postconf -d' output)\fR"
 /*	The \fBlocal\fR(8) delivery agent search list for finding a .forward
 /*	file with user-specified delivery methods.
@@ -439,7 +457,7 @@
 /*	Available in Postfix version 2.2 and later:
 /* .IP "\fBcommand_execution_directory (empty)\fR"
 /*	The \fBlocal\fR(8) delivery agent working directory for delivery to
-/*	external command.
+/*	external commands.
 /* MAILBOX LOCKING CONTROLS
 /* .ad
 /* .fi
@@ -488,7 +506,7 @@
 /*	$name expansions of $mailbox_command and $command_execution_directory.
 /* .IP "\fBdefault_privs (nobody)\fR"
 /*	The default rights used by the \fBlocal\fR(8) delivery agent for delivery
-/*	to external file or command.
+/*	to an external file or command.
 /* .IP "\fBforward_expansion_filter (see 'postconf -d' output)\fR"
 /*	Restrict the characters that the \fBlocal\fR(8) delivery agent allows in
 /*	$name expansions of $forward_path.
@@ -512,7 +530,7 @@
 /*	request before it is terminated by a built-in watchdog timer.
 /* .IP "\fBdelay_logging_resolution_limit (2)\fR"
 /*	The maximal number of digits after the decimal point when logging
-/*	sub-second delay values.
+/*	delay values.
 /* .IP "\fBexport_environment (see 'postconf -d' output)\fR"
 /*	The list of environment variables that a Postfix process will export
 /*	to non-Postfix processes.
@@ -520,7 +538,7 @@
 /*	The time limit for sending or receiving information over an internal
 /*	communication channel.
 /* .IP "\fBlocal_command_shell (empty)\fR"
-/*	Optional shell program for \fBlocal\fR(8) delivery to non-Postfix command.
+/*	Optional shell program for \fBlocal\fR(8) delivery to non-Postfix commands.
 /* .IP "\fBmax_idle (100s)\fR"
 /*	The maximum amount of time that an idle Postfix daemon process waits
 /*	for an incoming connection before terminating voluntarily.
@@ -541,9 +559,8 @@
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
 /*	The location of the Postfix top-level queue directory.
 /* .IP "\fBrecipient_delimiter (empty)\fR"
-/*	The set of characters that can separate a user name from its
-/*	extension (example: user+foo), or a .forward file name from its
-/*	extension (example: .forward+foo).
+/*	The set of characters that can separate an email address
+/*	localpart, user name, or a .forward file name from its extension.
 /* .IP "\fBrequire_home_directory (no)\fR"
 /*	Require that a \fBlocal\fR(8) recipient's home directory exists
 /*	before mail delivery is attempted.
@@ -602,6 +619,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -664,7 +684,7 @@ char   *var_mailbox_cmd_maps;
 char   *var_rcpt_fdelim;
 char   *var_local_cmd_shell;
 char   *var_luser_relay;
-int     var_biff;
+bool    var_biff;
 char   *var_mail_spool_dir;
 char   *var_mailbox_transport;
 char   *var_mbox_transp_maps;
@@ -676,10 +696,10 @@ char   *var_forward_path;
 char   *var_cmd_exp_filter;
 char   *var_fwd_exp_filter;
 char   *var_prop_extension;
-int     var_exp_own_alias;
+bool    var_exp_own_alias;
 char   *var_deliver_hdr;
-int     var_stat_home_dir;
-int     var_mailtool_compat;
+bool    var_stat_home_dir;
+bool    var_mailtool_compat;
 char   *var_mailbox_lock;
 long    var_mailbox_limit;
 bool    var_frozen_delivered;
@@ -730,7 +750,7 @@ static int local_deliver(DELIVER_REQUEST *rqst, char *service)
     state.msg_attr.fp = rqst->fp;
     state.msg_attr.offset = rqst->data_offset;
     state.msg_attr.encoding = rqst->encoding;
-    state.msg_attr.smtputf8 = rqst->smtputf8;
+    state.msg_attr.sendopts = rqst->sendopts;
     state.msg_attr.sender = rqst->sender;
     state.msg_attr.dsn_envid = rqst->dsn_envid;
     state.msg_attr.dsn_ret = rqst->dsn_ret;
@@ -742,6 +762,7 @@ static int local_deliver(DELIVER_REQUEST *rqst, char *service)
     state.loop_info = delivered_hdr_init(rqst->fp, rqst->data_offset,
 					 FOLD_ADDR_ALL);
     state.request = rqst;
+    state.alias_key = vstring_alloc(100);
 
     /*
      * Iterate over each recipient named in the delivery request. When the
@@ -766,6 +787,7 @@ static int local_deliver(DELIVER_REQUEST *rqst, char *service)
      */
     delivered_hdr_free(state.loop_info);
     deliver_attr_free(&state.msg_attr);
+    vstring_free(state.alias_key);
 
     return (msg_stat);
 }

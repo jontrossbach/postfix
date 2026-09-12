@@ -66,6 +66,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
  /*
@@ -105,7 +108,7 @@ TLSP_STATE *tlsp_state_create(const char *service,
 {
     TLSP_STATE *state = (TLSP_STATE *) mymalloc(sizeof(*state));
 
-    state->flags = TLSP_FLAG_DO_HANDSHAKE;
+    state->flags = 0;
     state->service = mystrdup(service);
     state->plaintext_stream = plaintext_stream;
     state->plaintext_buf = 0;
@@ -115,11 +118,14 @@ TLSP_STATE *tlsp_state_create(const char *service,
     state->remote_endpt = 0;
     state->server_id = 0;
     state->tls_context = 0;
-    state->tls_params = 0;
+    state->server_params = 0;
     state->server_init_props = 0;
     state->server_start_props = 0;
+    state->client_params = 0;
     state->client_init_props = 0;
     state->client_start_props = 0;
+    /* 200606 Qualys+Mythos: explicit initialization. */
+    state->ssl_last_err = SSL_ERROR_NONE;
 
     return (state);
 }
@@ -153,12 +159,14 @@ void    tlsp_state_free(TLSP_STATE *state)
 	myfree(state->server_id);
     if (state->tls_context)
 	tls_free_context(state->tls_context);
-    if (state->tls_params)
-	tls_proxy_client_param_free(state->tls_params);
+    if (state->server_params)
+	tls_proxy_server_param_free(state->server_params);
     if (state->server_init_props)
 	tls_proxy_server_init_free(state->server_init_props);
     if (state->server_start_props)
 	tls_proxy_server_start_free(state->server_start_props);
+    if (state->client_params)
+	tls_proxy_client_param_free(state->client_params);
     if (state->client_init_props)
 	tls_proxy_client_init_free(state->client_init_props);
     if (state->client_start_props)

@@ -145,7 +145,7 @@
 /* .fi
 /*	The Secure Mailer license must be distributed with this software.
 /* SEE ALSO
-/*	http://cr.yp.to/proto/netstrings.txt, netstring definition
+/*	https://cr.yp.to/proto/netstrings.txt, netstring definition
 /* AUTHOR(S)
 /*	Wietse Venema
 /*	IBM T.J. Watson Research
@@ -156,6 +156,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -163,6 +166,7 @@
 #include <sys_defs.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <errno.h>
 
 /* Utility library. */
 
@@ -301,14 +305,17 @@ void    netstring_put_multi(VSTREAM *stream,...)
     VA_COPY(ap2, ap);
 
     /*
-     * Figure out the total result size.
+     * Figure out the total result size. 202604 Claude: move the wrap-around
+     * guard inside the loop.
      */
-    for (total = 0; (data = va_arg(ap, char *)) != 0; total += data_len)
+    for (total = 0; (data = va_arg(ap, char *)) != 0; /* see below */ ) {
 	if ((data_len = va_arg(ap, ssize_t)) < 0)
 	    msg_panic("%s: bad data length %ld", myname, (long) data_len);
+	if (data_len > SSIZE_T_MAX - total)
+	    msg_panic("%s: total length overflow", myname);
+	total += data_len;
+    }
     va_end(ap);
-    if (total < 0)
-	msg_panic("%s: bad total length %ld", myname, (long) total);
     if (msg_verbose > 1)
 	msg_info("%s: write total length %ld", myname, (long) total);
 
@@ -367,12 +374,18 @@ const char *netstring_strerror(int err)
 	case NETSTRING_ERR_EOF:
 	return ("unexpected disconnect");
     case NETSTRING_ERR_TIME:
+	errno = ETIMEDOUT;
 	return ("time limit exceeded");
     case NETSTRING_ERR_FORMAT:
+	errno = 0;
 	return ("input format error");
     case NETSTRING_ERR_SIZE:
+#ifdef EMSGSIZE
+	errno = EMSGSIZE;
+#endif
 	return ("input exceeds size limit");
     default:
+	errno = 0;
 	return ("unknown netstring error");
     }
 }

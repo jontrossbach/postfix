@@ -67,6 +67,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
@@ -115,6 +120,8 @@ DELIVERED_HDR_INFO *delivered_hdr_init(VSTREAM *fp, off_t offset, int flags)
     char   *cp;
     DELIVERED_HDR_INFO *info;
     const HEADER_OPTS *hdr;
+    int     curr_type;
+    int     prev_type;
 
     /*
      * Sanity check.
@@ -130,15 +137,20 @@ DELIVERED_HDR_INFO *delivered_hdr_init(VSTREAM *fp, off_t offset, int flags)
 
     /*
      * XXX Assume that mail_copy() produces delivered-to headers that fit in
-     * a REC_TYPE_NORM record. Lowercase the delivered-to addresses for
-     * consistency.
+     * a REC_TYPE_NORM or REC_TYPE_CONT record. Lowercase the delivered-to
+     * addresses for consistency.
      * 
      * XXX Don't get bogged down by gazillions of delivered-to headers.
      */
 #define DELIVERED_HDR_LIMIT	1000
 
-    while (rec_get(fp, info->buf, 0) == REC_TYPE_NORM
-	   && info->table->used < DELIVERED_HDR_LIMIT) {
+    for (prev_type = REC_TYPE_NORM;
+	 info->table->used < DELIVERED_HDR_LIMIT
+	 && ((curr_type = rec_get(fp, info->buf, 0)) == REC_TYPE_NORM
+	     || curr_type == REC_TYPE_CONT);
+	 prev_type = curr_type) {
+	if (prev_type == REC_TYPE_CONT)
+	    continue;
 	if (is_header(STR(info->buf))) {
 	    if ((hdr = header_opts_find(STR(info->buf))) != 0
 		&& hdr->type == HDR_DELIVERED_TO) {

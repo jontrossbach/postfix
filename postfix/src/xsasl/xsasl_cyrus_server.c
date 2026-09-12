@@ -52,6 +52,10 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
+/*	Amawalk, NY 10501, USA
 /*--*/
 
 /* System library. */
@@ -617,7 +621,6 @@ static int xsasl_cyrus_server_next(XSASL_SERVER *xp, const char *request,
 
 static const char *xsasl_cyrus_server_get_username(XSASL_SERVER *xp)
 {
-    const char *myname = "xsasl_cyrus_server_get_username";
     XSASL_CYRUS_SERVER *server = (XSASL_CYRUS_SERVER *) xp;
     VOID_SERVEROUT_TYPE serverout = 0;
     int     sasl_status;
@@ -625,16 +628,15 @@ static const char *xsasl_cyrus_server_get_username(XSASL_SERVER *xp)
     /*
      * XXX Do not free(serverout).
      */
-    sasl_status = sasl_getprop(server->sasl_conn, SASL_USERNAME, &serverout);
-    if (sasl_status != SASL_OK || serverout == 0) {
-	msg_warn("%s: sasl_getprop SASL_USERNAME botch: %s",
-		 myname, xsasl_cyrus_strerror(sasl_status));
-	return (0);
-    }
     if (server->username)
 	myfree(server->username);
-    server->username = mystrdup(serverout);
-    printable(server->username, '?');
+    sasl_status = sasl_getprop(server->sasl_conn, SASL_USERNAME, &serverout);
+    if (sasl_status != SASL_OK || serverout == 0) {
+	server->username = 0;
+    } else {
+	server->username = mystrdup(serverout);
+	printable(server->username, '?');
+    }
     return (server->username);
 }
 

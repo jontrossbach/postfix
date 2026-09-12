@@ -6,7 +6,7 @@
 /* SYNOPSIS
 /*	#include <postconf.h>
 /*
-/*	void	pcf_register_user_parameters()
+/*	void	pcf_register_user_parameters(int mode)
 /* DESCRIPTION
 /*	Postfix has multiple parameter name spaces: the global
 /*	main.cf parameter name space, and the local parameter name
@@ -40,6 +40,10 @@
 /*	to instantiate legacy per-dbms parameters, and to examine
 /*	per-dbms configuration files. This is limited to the content
 /*	of global and local, built-in and per-service, parameters.
+/*
+/*	Arguments:
+/* .IP mode
+/*	Passed on to pcf_register_dbms_parameters().
 /* DIAGNOSTICS
 /*	Problems are reported to the standard error stream.
 /* LICENSE
@@ -104,6 +108,7 @@ static HTABLE *pcf_rest_class_table;
     PCF_PARAM_CTX _ctx; \
     _ctx.local_scope = (scope); \
     _ctx.param_class = (class); \
+    /* No MAC_EXP_FLAG_RECURSE, therefore no need for DONT_PARSE feature. */ \
     (void) mac_expand(NO_SCAN_RESULT, (value), MAC_EXP_FLAG_SCAN, \
 	    NO_SCAN_FILTER, pcf_flag_user_parameter_wrapper, (void *) &_ctx); \
 } while (0)
@@ -224,7 +229,7 @@ static const char *pcf_lookup_eval(const char *dict_name, const char *name)
 
 /* pcf_scan_user_parameter_namespace - scan parameters in name space */
 
-static void pcf_scan_user_parameter_namespace(const char *dict_name,
+static void pcf_scan_user_parameter_namespace(int mode, const char *dict_name,
 					        PCF_MASTER_ENT *local_scope)
 {
     const char *myname = "pcf_scan_user_parameter_namespace";
@@ -308,7 +313,7 @@ static void pcf_scan_user_parameter_namespace(const char *dict_name,
 	 */
 	if (node != 0
 	    && (PCF_BUILTIN_PARAMETER(node) || PCF_SERVICE_PARAMETER(node)))
-	    pcf_register_dbms_parameters(cparam_value, pcf_flag_user_parameter,
+	    pcf_register_dbms_parameters(mode, cparam_value, pcf_flag_user_parameter,
 					 local_scope);
 #endif
     }
@@ -345,7 +350,7 @@ static void pcf_scan_default_parameter_values(HTABLE *valid_params,
 
 /* pcf_register_user_parameters - add parameters with user-defined names */
 
-void    pcf_register_user_parameters(void)
+void    pcf_register_user_parameters(int mode)
 {
     const char *myname = "pcf_register_user_parameters";
     PCF_MASTER_ENT *masterp;
@@ -403,12 +408,12 @@ void    pcf_register_user_parameters(void)
      */
     for (masterp = pcf_master_table; masterp->argv != 0; masterp++)
 	if (masterp->all_params != 0)
-	    pcf_scan_user_parameter_namespace(masterp->name_space, masterp);
+	    pcf_scan_user_parameter_namespace(mode, masterp->name_space, masterp);
 
     /*
      * Scan parameter values that are left at their defaults in the global
      * name space. Some defaults contain the $name of an obsolete parameter
-     * for backwards compatilility purposes. We might warn that an explicit
+     * for backwards compatibility purposes. We might warn that an explicit
      * name=value is obsolete, but we must not warn that the parameter is
      * unused.
      */
@@ -418,5 +423,5 @@ void    pcf_register_user_parameters(void)
     /*
      * Scan the explicit name=value entries in the global name space.
      */
-    pcf_scan_user_parameter_namespace(CONFIG_DICT, (PCF_MASTER_ENT *) 0);
+    pcf_scan_user_parameter_namespace(mode, CONFIG_DICT, (PCF_MASTER_ENT *) 0);
 }

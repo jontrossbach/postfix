@@ -93,7 +93,7 @@ extern int mail_queue_id_ok(const char *);
   * - the inode number (base 51 encoded so that it contains no 'z').
   */
 #define MQID_LG_SEC_BASE	52	/* seconds safe alphabet base */
-#define MQID_LG_SEC_PAD	6	/* seconds minimum field width */
+#define MQID_LG_SEC_PAD	6		/* seconds minimum field width */
 #define MQID_LG_USEC_BASE	52	/* microseconds safe alphabet base */
 #define MQID_LG_USEC_PAD	4	/* microseconds exact field width */
 #define MQID_LG_TIME_PAD	(MQID_LG_SEC_PAD + MQID_LG_USEC_PAD)
@@ -105,12 +105,15 @@ extern int mail_queue_id_ok(const char *);
 	(((cp) = strrchr((path), MQID_LG_INUM_SEP)) != 0 \
 	    && ((cp) - (path) >= MQID_LG_TIME_PAD))
 
+/* 202607 Qualys+Mythos: skip short paths. */
 #define MQID_GET_INUM(path, inum, long_form, error) do { \
 	char *_cp; \
 	if (((long_form) = MQID_FIND_LG_INUM_SEPARATOR(_cp, (path))) != 0) { \
 	    MQID_LG_DECODE_INUM(_cp + 1, (inum), (error)); \
 	} else { \
-	    MQID_SH_DECODE_INUM((path) + MQID_SH_USEC_PAD, (inum), (error)); \
+	    if (strlen(path) > MQID_SH_USEC_PAD) \
+	      MQID_SH_DECODE_INUM((path) + MQID_SH_USEC_PAD, (inum), (error)); \
+	    else { (errno) = EINVAL; error = 1; } \
 	} \
     } while (0)
 

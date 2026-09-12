@@ -25,8 +25,10 @@
 #define CLEANUP_FLAG_SMTP_REPLY	(1<<7)	/* Enable SMTP reply */
 #define CLEANUP_FLAG_SMTPUTF8	(1<<8)	/* SMTPUTF8 requested */
 #define CLEANUP_FLAG_AUTOUTF8	(1<<9)	/* Autodetect SMTPUTF8 */
+#define CLEANUP_FLAG_REQTLS	(1<<10)	/* REQUIRETLS requested */
 
 #define CLEANUP_FLAG_FILTER_ALL	(CLEANUP_FLAG_FILTER | CLEANUP_FLAG_MILTER)
+
  /*
   * These are normally set when receiving mail from outside.
   */
@@ -62,6 +64,13 @@
 #define CLEANUP_STAT_RCPT	(1<<6)	/* No recipients found */
 #define CLEANUP_STAT_PROXY	(1<<7)	/* Proxy reject */
 #define CLEANUP_STAT_DEFER	(1<<8)	/* Temporary reject */
+#define CLEANUP_STAT_NOPERM	(1<<9)	/* Denied by non-content policy */
+
+ /*
+  * Non-cleanup errors that live in the same bitmask space, to centralize
+  * error handling.
+  */
+#define CLEANUP_STAT_BARE_LF   (1<<16)	/* Bare <LF> received */
 
  /*
   * These are set when we can't bounce even if we were asked to.
@@ -100,6 +109,11 @@ extern const char *cleanup_strflags(unsigned);
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 #endif

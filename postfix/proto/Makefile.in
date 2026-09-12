@@ -19,6 +19,7 @@ HTML	= ../html/ADDRESS_CLASS_README.html \
 	../html/CONTENT_INSPECTION_README.html \
 	../html/DATABASE_README.html ../html/DB_README.html \
 	../html/DEBUG_README.html \
+	../html/DEPRECATION_README.html \
 	../html/DSN_README.html \
 	../html/ETRN_README.html ../html/FILTER_README.html \
 	../html/FORWARD_SECRECY_README.html \
@@ -30,14 +31,20 @@ HTML	= ../html/ADDRESS_CLASS_README.html \
 	../html/LMDB_README.html \
 	../html/MEMCACHE_README.html \
 	../html/MILTER_README.html \
+	../html/MONGODB_README.html \
 	../html/MULTI_INSTANCE_README.html \
 	../html/MYSQL_README.html ../html/NFS_README.html \
+	../html/NON_BERKELEYDB_README.html \
 	../html/OVERVIEW.html \
 	../html/PACKAGE_README.html ../html/PCRE_README.html \
 	../html/PGSQL_README.html \
+	../html/POSTSCREEN_3_5_README.html \
 	../html/POSTSCREEN_README.html \
+	../html/PTEST_README.html \
 	../html/QSHAPE_README.html \
-	../html/RESTRICTION_CLASS_README.html ../html/SASL_README.html \
+	../html/RESTRICTION_CLASS_README.html \
+	../html/REQUIRETLS_README.html \
+	../html/SASL_README.html \
 	../html/SCHEDULER_README.html ../html/SMTPD_ACCESS_README.html \
 	../html/SMTPD_POLICY_README.html \
 	../html/SMTPD_PROXY_README.html \
@@ -47,6 +54,7 @@ HTML	= ../html/ADDRESS_CLASS_README.html \
 	../html/STANDARD_CONFIGURATION_README.html \
 	../html/STRESS_README.html \
 	../html/TLS_README.html ../html/TLS_LEGACY_README.html \
+	../html/TLSRPT_README.html \
 	../html/TUNING_README.html \
 	../html/UUCP_README.html \
 	../html/VERP_README.html ../html/VIRTUAL_README.html \
@@ -67,6 +75,7 @@ README	= ../README_FILES/ADDRESS_CLASS_README \
 	../README_FILES/DATABASE_README ../README_FILES/DB_README \
 	../README_FILES/DEBUG_README \
 	../README_FILES/DSN_README \
+	../README_FILES/DEPRECATION_README \
 	../README_FILES/ETRN_README ../README_FILES/FILTER_README \
 	../README_FILES/FORWARD_SECRECY_README \
 	../README_FILES/INSTALL ../README_FILES/IPV6_README \
@@ -77,14 +86,19 @@ README	= ../README_FILES/ADDRESS_CLASS_README \
 	../README_FILES/LMDB_README \
 	../README_FILES/MEMCACHE_README \
 	../README_FILES/MILTER_README \
+	../README_FILES/MONGODB_README \
 	../README_FILES/MULTI_INSTANCE_README \
 	../README_FILES/MYSQL_README ../README_FILES/NFS_README \
+	../README_FILES/NON_BERKELEYDB_README \
 	../README_FILES/OVERVIEW \
 	../README_FILES/PACKAGE_README ../README_FILES/PCRE_README \
 	../README_FILES/PGSQL_README \
+	../README_FILES/POSTSCREEN_3_5_README \
 	../README_FILES/POSTSCREEN_README \
+	../README_FILES/PTEST_README \
 	../README_FILES/QSHAPE_README \
 	../README_FILES/RESTRICTION_CLASS_README \
+	../README_FILES/REQUIRETLS_README \
 	../README_FILES/SASL_README ../README_FILES/SCHEDULER_README \
 	../README_FILES/SMTPD_ACCESS_README \
 	../README_FILES/SMTPD_POLICY_README ../README_FILES/SMTPD_PROXY_README \
@@ -94,6 +108,7 @@ README	= ../README_FILES/ADDRESS_CLASS_README \
 	../README_FILES/STANDARD_CONFIGURATION_README \
 	../README_FILES/STRESS_README \
 	../README_FILES/TLS_README ../README_FILES/TLS_LEGACY_README \
+	../README_FILES/TLSRPT_README \
 	../README_FILES/TUNING_README \
 	../README_FILES/UUCP_README \
 	../README_FILES/VERP_README ../README_FILES/VIRTUAL_README \
@@ -196,6 +211,9 @@ clobber:
 ../html/DEBUG_README.html: DEBUG_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
+../html/DEPRECATION_README.html: DEPRECATION_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
 ../html/DSN_README.html: DSN_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
@@ -238,6 +256,9 @@ clobber:
 ../html/MILTER_README.html: MILTER_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
+../html/MONGODB_README.html: MONGODB_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
 ../html/MULTI_INSTANCE_README.html: MULTI_INSTANCE_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
@@ -245,6 +266,9 @@ clobber:
 	$(DETAB) $? | $(POSTLINK) >$@
 
 ../html/NFS_README.html: NFS_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
+../html/NON_BERKELEYDB_README.html: NON_BERKELEYDB_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
 ../html/OVERVIEW.html: OVERVIEW.html
@@ -259,7 +283,13 @@ clobber:
 ../html/PGSQL_README.html: PGSQL_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
+../html/POSTSCREEN_3_5_README.html: POSTSCREEN_3_5_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
 ../html/POSTSCREEN_README.html: POSTSCREEN_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
+../html/PTEST_README.html: PTEST_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
 ../html/QMQP_README.html: QMQP_README.html
@@ -269,6 +299,9 @@ clobber:
 	$(DETAB) $? | $(POSTLINK) >$@
 
 ../html/RESTRICTION_CLASS_README.html: RESTRICTION_CLASS_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
+../html/REQUIRETLS_README.html: REQUIRETLS_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
 ../html/SASL_README.html: SASL_README.html
@@ -328,6 +361,9 @@ clobber:
 ../html/TLS_LEGACY_README.html: TLS_LEGACY_README.html
 	$(DETAB) $? | $(POSTLINK) >$@
 
+../html/TLSRPT_README.html: TLSRPT_README.html
+	$(DETAB) $? | $(POSTLINK) >$@
+
 ../README_FILES/ADDRESS_CLASS_README: ADDRESS_CLASS_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
@@ -376,6 +412,9 @@ clobber:
 ../README_FILES/DSN_README: DSN_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
+../README_FILES/DEPRECATION_README: DEPRECATION_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
 ../README_FILES/ETRN_README: ETRN_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
@@ -415,6 +454,9 @@ clobber:
 ../README_FILES/MILTER_README: MILTER_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
+../README_FILES/MONGODB_README: MONGODB_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
 ../README_FILES/MULTI_INSTANCE_README: MULTI_INSTANCE_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
@@ -422,6 +464,9 @@ clobber:
 	$(DETAB) $? | $(HT2READ) >$@
 
 ../README_FILES/NFS_README: NFS_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
+../README_FILES/NON_BERKELEYDB_README: NON_BERKELEYDB_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
 ../README_FILES/OVERVIEW: OVERVIEW.html
@@ -436,7 +481,13 @@ clobber:
 ../README_FILES/PGSQL_README: PGSQL_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
+../README_FILES/POSTSCREEN_3_5_README: POSTSCREEN_3_5_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
 ../README_FILES/POSTSCREEN_README: POSTSCREEN_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
+../README_FILES/PTEST_README: PTEST_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
 ../README_FILES/QMQP_README: QMQP_README.html
@@ -446,6 +497,9 @@ clobber:
 	$(DETAB) $? | $(HT2READ) >$@
 
 ../README_FILES/RESTRICTION_CLASS_README: RESTRICTION_CLASS_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
+../README_FILES/REQUIRETLS_README: REQUIRETLS_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
 ../README_FILES/SASL_README: SASL_README.html
@@ -505,6 +559,9 @@ clobber:
 ../README_FILES/TLS_LEGACY_README: TLS_LEGACY_README.html
 	$(DETAB) $? | $(HT2READ) >$@
 
+../README_FILES/TLSRPT_README: TLSRPT_README.html
+	$(DETAB) $? | $(HT2READ) >$@
+
 ../README_FILES/AAAREADME: ../html/index.html $(MAKEAAA)
 	$(MAKEAAA) ../html/index.html | $(HT2READ) | $(DETAB) >$@
 
@@ -518,9 +575,9 @@ clobber:
 ../html/postconf.5.html: postconf.html.prolog postconf.proto \
 	postconf.html.epilog ../mantools/xpostconf ../mantools/postconf2html \
 	../mantools/postlink
-	(cat postconf.html.prolog; ../mantools/xpostconf postconf.proto | \
-	    ../mantools/postconf2html | ../mantools/postlink; \
-	    cat postconf.html.epilog ) | $(DETAB) > $@
+	(cat postconf.html.prolog; \
+	    ../mantools/xpostconf postconf.proto | ../mantools/postconf2html; \
+	    cat postconf.html.epilog ) | ../mantools/postlink | $(DETAB) > $@
 
 ../INSTALL: ../README_FILES/INSTALL
 	rm -f $@

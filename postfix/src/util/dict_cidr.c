@@ -16,6 +16,7 @@
 /*	"naked" IP address or a netblock in CIDR notation.
 /* SEE ALSO
 /*	dict(3) generic dictionary manager
+/*	cidr_table(5) CIDR table configuration
 /* AUTHOR(S)
 /*	Jozsef Kadlecsik
 /*	kadlec@blackhole.kfki.hu
@@ -236,11 +237,14 @@ static DICT_CIDR_ENTRY *dict_cidr_parse_rule(DICT *dict, char *p, int lineno,
     rule->lineno = lineno;
 
     if (msg_verbose) {
-	if (inet_ntop(cidr_info.addr_family, cidr_info.net_bytes,
-		      hostaddr.buf, sizeof(hostaddr.buf)) == 0)
-	    msg_fatal("inet_ntop: %m");
-	msg_info("dict_cidr_open: add %s/%d %s",
-		 hostaddr.buf, cidr_info.mask_shift, rule->value);
+	/* 202604 Claude: ENDIF has no address pattern. */
+	if (cidr_info.op != CIDR_MATCH_OP_ENDIF) {
+	    if (inet_ntop(cidr_info.addr_family, cidr_info.net_bytes,
+			  hostaddr.buf, sizeof(hostaddr.buf)) == 0)
+		msg_fatal("inet_ntop: %m");
+	    msg_info("dict_cidr_open: add %s/%d %s",
+		     hostaddr.buf, cidr_info.mask_shift, rule->value);
+	}
     }
     return (rule);
 }
@@ -289,13 +293,11 @@ DICT   *dict_cidr_open(const char *mapname, int open_flags, int dict_flags)
     /*
      * Open the configuration file.
      */
-    if ((map_fp = vstream_fopen(mapname, O_RDONLY, 0)) == 0)
+    if ((map_fp = dict_stream_open(DICT_TYPE_CIDR, mapname, O_RDONLY,
+				   dict_flags, &st, &why)) == 0)
 	DICT_CIDR_OPEN_RETURN(dict_surrogate(DICT_TYPE_CIDR, mapname,
 					     open_flags, dict_flags,
-					     "open %s: %m", mapname));
-    if (fstat(vstream_fileno(map_fp), &st) < 0)
-	msg_fatal("fstat %s: %m", mapname);
-
+					     "%s", vstring_str(why)));
     line_buffer = vstring_alloc(100);
     why = vstring_alloc(100);
 
@@ -359,5 +361,5 @@ DICT   *dict_cidr_open(const char *mapname, int open_flags, int dict_flags)
 	(void) mvect_free(&mvect);
 
     dict_file_purge_buffers(&dict_cidr->dict);
-    DICT_CIDR_OPEN_RETURN(DICT_DEBUG (&dict_cidr->dict));
+    DICT_CIDR_OPEN_RETURN(&dict_cidr->dict);
 }

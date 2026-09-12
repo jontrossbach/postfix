@@ -252,6 +252,7 @@ DICT   *dict_nisplus_open(const char *map, int open_flags, int dict_flags)
     const char *myname = "dict_nisplus_open";
     DICT_NISPLUS *dict_nisplus;
     char   *col_field;
+    const char *cp;
 
     /*
      * Sanity check.
@@ -284,7 +285,12 @@ DICT   *dict_nisplus_open(const char *map, int open_flags, int dict_flags)
      * other attributes must specify fixed values. The reason for using ';'
      * is that the comma character is special in main.cf. When no column
      * number is given at the end of the map name, we use a default column.
+     * 
+     * 2026506 Qualys+Mythos: enforce template substitution syntax.
      */
+    if ((cp = strchr(map, '%')) == 0 || strncmp(cp, "%s", 2) != 0
+	|| strchr(cp + 2, '%') != 0)
+	msg_fatal("bad '%%' substitution syntax in NIS+ map name: %s", map);
     dict_nisplus->template = mystrdup(map);
     translit(dict_nisplus->template, ";", ",");
     if ((col_field = strstr(dict_nisplus->template, ".:")) != 0) {
@@ -298,7 +304,7 @@ DICT   *dict_nisplus_open(const char *map, int open_flags, int dict_flags)
     if (msg_verbose)
 	msg_info("%s: opened NIS+ table %s for column %d",
 		 myname, dict_nisplus->template, dict_nisplus->column);
-    return (DICT_DEBUG (&dict_nisplus->dict));
+    return (&dict_nisplus->dict);
 }
 
 #endif

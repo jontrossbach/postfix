@@ -14,8 +14,8 @@ Postfix TLS proxy
 .fi
 The \fBtlsproxy\fR(8) server implements a two\-way TLS proxy. It
 is used by the \fBpostscreen\fR(8) server to talk SMTP\-over\-TLS
-with remote SMTP clients that are not whitelisted (including
-clients whose whitelist status has expired), and by the
+with remote SMTP clients that are not allowlisted (including
+clients whose allowlist status has expired), and by the
 \fBsmtp\fR(8) client to support TLS connection reuse, but it
 should also work for non\-SMTP protocols.
 
@@ -90,10 +90,6 @@ internal pseudo random number generator (PRNG).
 The OpenSSL cipherlist for "high" grade ciphers.
 .IP "\fBtls_medium_cipherlist (see 'postconf -d' output)\fR"
 The OpenSSL cipherlist for "medium" or higher grade ciphers.
-.IP "\fBtls_low_cipherlist (see 'postconf -d' output)\fR"
-The OpenSSL cipherlist for "low" or higher grade ciphers.
-.IP "\fBtls_export_cipherlist (see 'postconf -d' output)\fR"
-The OpenSSL cipherlist for "export" or higher grade ciphers.
 .IP "\fBtls_null_cipherlist (eNULL:!aNULL)\fR"
 The OpenSSL cipherlist for "NULL" grade ciphers that provide
 authentication without encryption.
@@ -111,6 +107,12 @@ List or bit\-mask of OpenSSL bug work\-arounds to disable.
 With SSLv3 and later, use the Postfix SMTP server's cipher
 preference order instead of the remote client's cipher preference
 order.
+.PP
+Available in Postfix version 2.8..3.7:
+.IP "\fBtls_low_cipherlist (see 'postconf -d' output)\fR"
+The OpenSSL cipherlist for "low" or higher grade ciphers.
+.IP "\fBtls_export_cipherlist (see 'postconf -d' output)\fR"
+The OpenSSL cipherlist for "export" or higher grade ciphers.
 .PP
 Available in Postfix version 2.9 and later:
 .IP "\fBtls_legacy_public_key_fingerprints (no)\fR"
@@ -137,8 +139,8 @@ The location of the OpenSSL command line program \fBopenssl\fR(1).
 .PP
 Available in Postfix version 3.2 and later:
 .IP "\fBtls_eecdh_auto_curves (see 'postconf -d' output)\fR"
-The prioritized list of elliptic curves supported by the Postfix
-SMTP client and server.
+The prioritized list of elliptic curves, that should be enabled in the
+Postfix SMTP client and server.
 .PP
 Available in Postfix version 3.4 and later:
 .IP "\fBtls_server_sni_maps (empty)\fR"
@@ -150,6 +152,19 @@ Available in Postfix 3.5, 3.4.6, 3.3.5, 3.2.10, 3.1.13 and later:
 .IP "\fBtls_fast_shutdown_enable (yes)\fR"
 A workaround for implementations that hang Postfix while shutting
 down a TLS session, until Postfix times out.
+.PP
+Available in Postfix version 3.8 and later:
+.IP "\fBtls_ffdhe_auto_groups (see 'postconf -d' output)\fR"
+The prioritized list of finite\-field Diffie\-Hellman ephemeral
+(FFDHE) key exchange groups supported by the Postfix SMTP client and
+server.
+.PP
+Available in Postfix 3.9, 3.8.1, 3.7.6, 3.6.10, 3.5.20 and later:
+.IP "\fBtls_config_file (default)\fR"
+Optional configuration file with baseline OpenSSL settings.
+.IP "\fBtls_config_name (empty)\fR"
+The application name passed by Postfix to OpenSSL library
+initialization functions.
 .SH "STARTTLS SERVER CONTROLS"
 .na
 .nf
@@ -240,6 +255,12 @@ parameters smtpd_use_tls and smtpd_enforce_tls.
 .IP "\fBtlsproxy_tls_chain_files ($smtpd_tls_chain_files)\fR"
 Files with the Postfix \fBtlsproxy\fR(8) server keys and certificate
 chains in PEM format.
+.PP
+Available in Postfix version 3.9 and later:
+.IP "\fBtlsproxy_tls_enable_rpk ($smtpd_tls_enable_rpk)\fR"
+Request that remote SMTP clients send an RFC7250 raw public key
+instead of an X.509 certificate, when asking or requiring client
+authentication.
 .SH "STARTTLS CLIENT CONTROLS"
 .na
 .nf
@@ -287,17 +308,8 @@ certificate fingerprints.
 .IP "\fBtlsproxy_client_loglevel ($smtp_tls_loglevel)\fR"
 Enable additional Postfix \fBtlsproxy\fR(8) client logging of TLS
 activity.
-.IP "\fBtlsproxy_client_loglevel_parameter (smtp_tls_loglevel)\fR"
-The name of the parameter that provides the tlsproxy_client_loglevel
-value.
 .IP "\fBtlsproxy_client_scert_verifydepth ($smtp_tls_scert_verifydepth)\fR"
 The verification depth for remote TLS server certificates.
-.IP "\fBtlsproxy_client_security_level ($smtp_tls_security_level)\fR"
-The default TLS security level for the Postfix \fBtlsproxy\fR(8)
-client.
-.IP "\fBtlsproxy_client_policy_maps ($smtp_tls_policy_maps)\fR"
-Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
-security policy by next\-hop destination.
 .IP "\fBtlsproxy_client_use_tls ($smtp_use_tls)\fR"
 Opportunistic mode: use TLS when a remote server announces TLS
 support.
@@ -307,6 +319,22 @@ Enforcement mode: require that SMTP servers use TLS encryption.
 Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
 usage policy by next\-hop destination and by remote TLS server
 hostname.
+.PP
+Available in Postfix version 3.4\-3.6:
+.IP "\fBtlsproxy_client_level ($smtp_tls_security_level)\fR"
+The default TLS security level for the Postfix \fBtlsproxy\fR(8)
+client.
+.IP "\fBtlsproxy_client_policy ($smtp_tls_policy_maps)\fR"
+Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
+security policy by next\-hop destination.
+.PP
+Available in Postfix version 3.7 and later:
+.IP "\fBtlsproxy_client_security_level ($smtp_tls_security_level)\fR"
+The default TLS security level for the Postfix \fBtlsproxy\fR(8)
+client.
+.IP "\fBtlsproxy_client_policy_maps ($smtp_tls_policy_maps)\fR"
+Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
+security policy by next\-hop destination.
 .SH "OBSOLETE STARTTLS SUPPORT CONTROLS"
 .na
 .nf
@@ -320,6 +348,11 @@ but do not require that clients use TLS encryption.
 .IP "\fBtlsproxy_enforce_tls ($smtpd_enforce_tls)\fR"
 Mandatory TLS: announce STARTTLS support to remote SMTP clients, and
 require that clients use TLS encryption.
+.IP "\fBtlsproxy_client_use_tls ($smtp_use_tls)\fR"
+Opportunistic mode: use TLS when a remote server announces TLS
+support.
+.IP "\fBtlsproxy_client_enforce_tls ($smtp_enforce_tls)\fR"
+Enforcement mode: require that SMTP servers use TLS encryption.
 .SH "RESOURCE CONTROLS"
 .na
 .nf
@@ -381,3 +414,6 @@ Wietse Venema
 Google, Inc.
 111 8th Avenue
 New York, NY 10011, USA
+
+Wietse Venema
+porcupine.org

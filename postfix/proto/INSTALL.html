@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix Installation From Source Code </title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -125,9 +126,9 @@ $ setenv MANPATH "`pwd`/man:$MANPATH"
 </pre>
 </blockquote>
 
-<p> Of particular interest is the postconf(5) manual page that
-lists all the 500+ configuration parameters. The HTML version of
-this text makes it easy to navigate around.  </p>
+<p> Of particular interest is the postconf(5) manual page that lists
+all the 900+ configuration parameters. The hyperlinks in the HTML
+version (html/postconf.5.html) make the text easy to navigate. </p>
 
 <p> All Postfix source files have their own built-in manual page.
 Tools to extract those embedded manual pages are available in the
@@ -135,10 +136,9 @@ mantools directory. </p>
 
 <h2> <a name="4">4 - Building on a supported system</a> </h2>
 
-<p> Postfix development happens on FreeBSD and MacOS X, with regular
-tests on Linux (Fedora, Ubuntu) and Solaris. Support for other
-systems relies on feedback from their users, and may not always be
-up-to-date. </p>
+<p> Postfix development happens on FreeBSD and Linux, with occasional
+tests on Solaris. Support for other systems relies on feedback from
+their users, and may not always be up-to-date. </p>
 
 <p> OpenBSD is partially supported. The libc resolver does not
 implement the documented "internal resolver options which are [...]
@@ -534,7 +534,7 @@ built, with "make install" or "make upgrade". </p>
 </pre>
 </blockquote>
 
-<p> As with the command "make makefiles, the command "make
+<p> As with the command "make makefiles", the command "make
 install/upgrade name=value..." will replace the string MAIL_VERSION
 at the end of a configuration parameter value with the Postfix
 release version.  Do not try to specify something like $mail_version
@@ -598,11 +598,17 @@ describe how to build Postfix with support for optional features:
 <tr> <td> Berkeley DB database</td> <td>DB_README</td> <td> Postfix
 1.0 </td> </tr>
 
+<tr> <td> CDB database</td> <td>CDB_README</td> <td> Postfix
+2.2 </td> </tr>
+
 <tr> <td> LMDB database</td> <td>LMDB_README</td> <td> Postfix
 2.11 </td> </tr>
 
 <tr> <td> LDAP database</td> <td>LDAP_README</td> <td> Postfix
 1.0 </td> </tr>
+
+<tr> <td> MongoDB database</td> <td>MONGODB_README</td> <td> Postfix
+3.9 </td> </tr>
 
 <tr> <td> MySQL database</td> <td>MYSQL_README</td> <td> Postfix
 1.0 </td> </tr>
@@ -668,7 +674,9 @@ listed below. See the postconf(5) manpage for a description
 
 <tr> <td>config_directory</td> <td>/etc/postfix</td> </tr>
 
-<tr> <td>default_database_type</td> <td>hash</td> </tr>
+<tr> <td>default_database_type</td> <td>lmdb, cdb, or hash</td> </tr>
+
+<tr> <td>default_cache_db_type</td> <td>lmdb or btree</td> </tr>
 
 <tr> <td>daemon_directory</td> <td>/usr/libexec/postfix</td> </tr>
 
@@ -710,7 +718,7 @@ use: </p>
 
 <blockquote>
 <pre>
-$ make makefiles CCARGS='-DDEF_CONFIG_DIR=\"/some/where\"'
+$ make makefiles CCARGS="-DDEF_CONFIG_DIR=\\\"/some/where\\\""
 $ make
 </pre>
 </blockquote>
@@ -736,7 +744,10 @@ default</th> </tr>
 <td>/etc/postfix</td> </tr>
 
 <tr> <td>DEF_DB_TYPE</td> <td>default_database_type</td>
-<td>hash</td> </tr>
+<td>lmdb, cdb, or hash</td> </tr>
+
+<tr> <td>DEF_CACHE_DB_TYPE</td> <td>default_cache_db_type</td>
+<td>lmdb or btree</td> </tr>
 
 <tr> <td>DEF_DAEMON_DIR</td> <td>daemon_directory</td>
 <td>/usr/libexec/postfix</td> </tr>
@@ -765,12 +776,17 @@ default</th> </tr>
 <tr> <td>DEF_SENDMAIL_PATH</td> <td>sendmail_path</td>
 <td>/usr/sbin/sendmail</td> </tr>
 
+<tr> <td>DEF_SHLIB_DIR</td> <td>shlib_directory</td>
+<td>/usr/lib/postfix</td> </tr>
+
 </table>
 
 </blockquote>
 
 <p> Note: the data_directory parameter (for caches and pseudo-random
-numbers) was introduced with Postfix version 2.5. </p>
+numbers) was introduced with Postfix version 2.5; shlib_directory
+(for shared-library objects and database plugins) with Postfix
+version 3.0. </p>
 
 <h3><a name="build_other">4.7 - Overriding other compile-time
 features</a></h3>
@@ -808,9 +824,9 @@ off Postfix features at compile time:</td> </tr>
 
 <tr> <td> </td> <td> -DNO_DB </td> <td> Do not build with Berkeley
 DB support. By default, Berkeley DB support is compiled in on
-platforms that are known to support this feature. If you override
-this, then you probably should also override DEF_DB_TYPE as described
-in section 4.6.  </td> </tr>
+platforms that have historically supported this feature. If you override
+this, then you probably should also override default_database_type
+or DEF_DB_TYPE as described in section 4.6. </td> </tr>
 
 <tr> <td> </td> <td> -DNO_DNSSEC </td> <td> Do not build with DNSSEC
 support, even if the resolver library appears to support it. </td>
@@ -837,7 +853,7 @@ unreachable code. </td> </tr>
 <tr> <td> </td> <td> -DNO_IPV6 </td> <td> Do not build with IPv6
 support. By default, IPv6 support is compiled in on platforms that
 are known to have IPv6 support. Note: this directive is for debugging
-And testing only. It is not guaranteed to work on all platforms.
+and testing only. It is not guaranteed to work on all platforms.
 If you don't want IPv6 support, set "inet_protocols = ipv4" in
 main.cf.
 </td> </tr>
@@ -874,6 +890,12 @@ they are known to be available. </td> </tr>
 <tr> <td> </td> <td> -DNO_SNPRINTF </td> <td> Use <tt>sprintf()</tt>
 instead of <tt>snprintf()</tt>.  By default, Postfix uses
 <tt>snprintf()</tt> except on ancient systems. </td> </tr>
+
+<tr> <td> </td> <td> -DNO_TLS_TRACE </td> <td> Do not build with support
+for OpenSSL TLS traces.  Some vendor OpenSSL runtime libraries are built
+without support for tracing, and Postfix software built on a system with
+TLS trace support would not work when installed on one without.  See
+<tt>smtp_tls_loglevel</tt> in the postconf(5) manual. </td> </tr>
 
 <tr> <td colspan="2"> DEBUG=debug_level </td> <td> Specifies a
 non-default compiler debugging level. The default is "<tt>-g</tt>".
@@ -973,7 +995,7 @@ Postfix (section 6).
 <p> If the command produces compiler error messages, it may be time
 to search the web or to ask the postfix-users@postfix.org mailing
 list, but be sure to search the mailing list archives first. Some
-mailing list archives are linked from http://www.postfix.org/. </p>
+mailing list archives are linked from https://www.postfix.org/. </p>
 
 <h2> <a name="5">5 - Porting Postfix to an unsupported system</a> </h2>
 
@@ -1185,7 +1207,7 @@ file. </p>
 
 <blockquote>
 <pre>
-$ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+$ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 </pre>
 </blockquote>
 
@@ -1240,7 +1262,7 @@ of: </p>
 
 <p> Follow the instructions in the "<a href="#mandatory">Mandatory
 configuration file edits</a>" in section 10, and review the "<a
-name="#hamlet">To chroot or not to chroot</a>" text in section
+href="#hamlet">To chroot or not to chroot</a>" text in section
 11. </p>
 
 <p> Start the Postfix system: </p>
@@ -1266,7 +1288,7 @@ file. </p>
 
 <blockquote>
 <pre>
-$ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+$ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 </pre>
 </blockquote>
 
@@ -1331,7 +1353,7 @@ file. </p>
 
 <blockquote>
 <pre>
-$ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+$ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 </pre>
 </blockquote>
 
@@ -1542,8 +1564,8 @@ the exact location of the text file.  </p>
 
 <p> First, be sure to update the text file with aliases for root,
 postmaster and "postfix" that forward mail to a real person.  Postfix
-has a sample aliases file /etc/postfix/aliases that you can adapt
-to local conditions.  </p>
+has a sample aliases file /etc/postfix/aliases that you can copy
+and adapt to local conditions.  /p>
 
 <blockquote>
 <pre>
@@ -1565,8 +1587,18 @@ following commands: </p>
 <pre>
 # newaliases
 # sendmail -bi
+# postalias /etc/aliases (pathname is system dependent!)
 </pre>
 </blockquote>
+
+<p> The form "postalias /etc/aliases" builds a default-type indexed
+file. Use "postalias <i>type</i>:/etc/aliases" to specify an explicit
+type (it should match the type in the output from "postconf -x
+alias_maps"). </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <h2><a name="hamlet">11 - To chroot or not to chroot</a></h2>
 
@@ -1649,7 +1681,7 @@ idea to run every night before the syslog files are rotated: </p>
 <blockquote>
 <pre>
 # postfix check
-# egrep '(reject|warning|error|fatal|panic):' /some/log/file
+# grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 </pre>
 </blockquote>
 

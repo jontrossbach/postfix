@@ -28,7 +28,8 @@
 /*	destinations may be specified as "unix:pathname", "inet:host"
 /*	or "inet:host:port".
 /*
-/*	With SMTP, the Internet domain name service is queried for mail
+/*	With SMTP, or with SRV record lookup enabled, the Internet
+/*	domain name service is queried for mail
 /*	exchanger hosts. Quote the domain name with `[' and `]' to
 /*	suppress mail exchanger lookups.
 /*
@@ -93,6 +94,7 @@
 #include <myaddrinfo.h>
 #include <sock_addr.h>
 #include <inet_proto.h>
+#include <known_tcp_ports.h>
 
 /* Global library. */
 
@@ -102,6 +104,8 @@
 #include <mail_error.h>
 #include <dsn_buf.h>
 #include <mail_addr.h>
+#include <valid_hostname.h>
+#include <sendopts.h>
 
 /* DNS library. */
 
@@ -183,6 +187,8 @@ static SMTP_SESSION *smtp_connect_addr(SMTP_ITERATOR *iter, DSN_BUF *why,
     int     sock;
     char   *bind_addr;
     char   *bind_var;
+    char   *saved_bind_addr = 0;
+    char   *tail;
 
     dsb_reset(why);				/* Paranoia */
 
@@ -201,6 +207,13 @@ static SMTP_SESSION *smtp_connect_addr(SMTP_ITERATOR *iter, DSN_BUF *why,
      */
     if ((sock = socket(sa->sa_family, SOCK_STREAM, 0)) < 0)
 	msg_fatal("%s: socket: %m", myname);
+
+#define RETURN_EARLY() do { \
+	if (saved_bind_addr) \
+	    myfree(saved_bind_addr); \
+	(void) close(sock); \
+	return (0); \
+    } while (0)
 
     if (inet_windowsize > 0)
 	set_inet_windowsize(sock, inet_windowsize);
@@ -224,13 +237,27 @@ static SMTP_SESSION *smtp_connect_addr(SMTP_ITERATOR *iter, DSN_BUF *why,
 	int     aierr;
 	struct addrinfo *res0;
 
+	if (*bind_addr == '[') {
+	    saved_bind_addr = mystrdup(bind_addr + 1);
+	    if ((tail = split_at(saved_bind_addr, ']')) == 0 || *tail)
+		msg_fatal("%s: malformed %s parameter: %s",
+			  myname, bind_var, bind_addr);
+	    bind_addr = saved_bind_addr;
+	}
 	if ((aierr = hostaddr_to_sockaddr(bind_addr, (char *) 0, 0, &res0)) != 0)
 	    msg_fatal("%s: bad %s parameter: %s: %s",
 		      myname, bind_var, bind_addr, MAI_STRERROR(aierr));
-	if (bind(sock, res0->ai_addr, res0->ai_addrlen) < 0)
+	if (bind(sock, res0->ai_addr, res0->ai_addrlen) < 0) {
 	    msg_warn("%s: bind %s: %m", myname, bind_addr);
-	else if (msg_verbose)
+	    if (var_smtp_bind_addr_enforce) {
+		freeaddrinfo(res0);
+		dsb_simple(why, "4.4.0", "server configuration error");
+		RETURN_EARLY();
+	    }
+	} else if (msg_verbose)
 	    msg_info("%s: bind %s", myname, bind_addr);
+	if (saved_bind_addr)
+	    myfree(saved_bind_addr);
 	freeaddrinfo(res0);
     }
 
@@ -333,7 +360,8 @@ static SMTP_SESSION *smtp_connect_sock(int sock, struct sockaddr *sa,
 /* smtp_parse_destination - parse host/port destination */
 
 static char *smtp_parse_destination(char *destination, char *def_service,
-				            char **hostp, unsigned *portp)
+				            char **hostp, char **servicep,
+				            unsigned *portp)
 {
     char   *buf = mystrdup(destination);
     char   *service;
@@ -349,15 +377,17 @@ static char *smtp_parse_destination(char *destination, char *def_service,
      * Parse the host/port information. We're working with a copy of the
      * destination argument so the parsing can be destructive.
      */
-    if ((err = host_port(buf, hostp, (char *) 0, &service, def_service)) != 0)
+    if ((err = host_port(buf, hostp, (char *) 0, servicep, def_service)) != 0)
 	msg_fatal("%s in server description: %s", err, destination);
 
     /*
      * Convert service to port number, network byte order.
      */
+    service = (char *) filter_known_tcp_port(*servicep);
     if (alldig(service)) {
 	if ((port = atoi(service)) >= 65536 || port == 0)
-	    msg_fatal("bad network port in destination: %s", destination);
+	    msg_fatal("bad network port: %s for destination: %s",
+		      service, destination);
 	*portp = htons(port);
     } else {
 	if ((sp = getservbyname(service, protocol)) == 0)
@@ -468,6 +498,99 @@ static void smtp_cache_policy(SMTP_STATE *state, const char *dest)
     }
 }
 
+#ifdef USE_TLS
+
+/* smtp_get_effective_tls_level - get the effective TLS security level */
+
+static int smtp_get_effective_tls_level(DSN_BUF *why, SMTP_STATE *state)
+{
+    SMTP_ITERATOR *iter = state->iterator;
+    SMTP_TLS_POLICY *tls = state->tls;
+
+    /*
+     * Prepare TLS feature status logging.
+     */
+    if (state->tls_stats) {
+	pol_stats_revert(state->tls_stats);
+	if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE)
+	    smtp_tls_stat_activate_reqtls(state->tls_stats,
+					  SMTP_TLS_STAT_NAME_REQTLS);
+    }
+
+    /*
+     * Determine the TLS level for this destination.
+     */
+    if (!smtp_tls_policy_cache_query(why, tls, iter)) {
+	if (state->tls_stats)
+	    smtp_tls_stat_activate_sec_unknown(state->tls_stats);
+	return (0);
+    }
+    if (state->tls_stats)
+	smtp_tls_stat_activate_sec_level(state->tls_stats,
+					 state->tls->level);
+
+    /*
+     * Skip this destination if its TLS policy cannot satisfy the REQUIRETLS
+     * policy for this destination (REQUIRETLS Failure).
+     * 
+     * Otherwise, log what would fail if REQUIRETLS was fully enforced
+     * (REQUIRETLS Debug).
+     * 
+     * Finally, skip this destination if its REQUIRETLS policy is bad.
+     */
+    switch (state->reqtls_level) {
+    case SMTP_REQTLS_POLICY_ACT_ENFORCE:
+	if (TLS_MUST_MATCH(tls->level) == 0) {
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+					    SMTP_TLS_STAT_NAME_NOCMATCH,
+					    POL_STAT_VIOLATION);
+	    dsb_simple(why, "5.7.10", "Sender requested REQUIRETLS, "
+		       "but my configured TLS security level '%s' "
+		       "disables certificate matching. The last "
+		       "attempted server was %s", str_tls_level(tls->level),
+		       STR(iter->host));
+	    return (0);
+	}
+	break;
+    case SMTP_REQTLS_POLICY_ACT_OPP_TLS:
+	if (tls->level == TLS_LEV_NONE) {
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+					    SMTP_TLS_STAT_NAME_NOTLS,
+					    POL_STAT_VIOLATION);
+	    dsb_simple(why, "5.7.10", "Sender requested REQUIRETLS, "
+		       "but my configured TLS security level '%s' "
+		       "disables encryption. The last attempted "
+		       "server was %s", str_tls_level(tls->level),
+		       STR(iter->host));
+	    return (0);
+	} else if (TLS_MUST_MATCH(tls->level) == 0) {
+	    msg_info("%s: Sender requested REQUIRETLS, but my "
+		     "configured TLS security level '%s' disables "
+		     "certificate matching. The last attempted server "
+		     "was %s", state->request->queue_id,
+		     str_tls_level(tls->level), STR(iter->host));
+	}
+	break;
+    case SMTP_REQTLS_POLICY_ACT_OPPORTUNISTIC:
+    case SMTP_REQTLS_POLICY_ACT_DISABLE:
+	break;
+    default:
+	dsb_simple(why, "4.7.10", "REQUIRETLS policy configuration "
+		   "error. The last attempted server was %s",
+		   STR(iter->host));
+	return (0);
+    }
+
+    /*
+     * Success.
+     */
+    return (1);
+}
+
+#endif
+
 /* smtp_connect_local - connect to local server */
 
 static void smtp_connect_local(SMTP_STATE *state, const char *path)
@@ -496,6 +619,19 @@ static void smtp_connect_local(SMTP_STATE *state, const char *path)
 	SET_SCACHE_REQUEST_NEXTHOP(state, path);
 
     /*
+     * REQUIRETLS policy selection is based on the same TLS net-hop name as
+     * with certificate matching. When var_reqtls_enable != 0,
+     * smtp_reqtls_policy must also be != 0.
+     */
+#ifdef USE_TLS
+    if (STATE_REQTLS_IS_REQUESTED(var_reqtls_enable, state))
+	state->reqtls_level =
+	    smtp_reqtls_policy_eval(smtp_reqtls_policy, var_myhostname);
+    else
+	state->reqtls_level = SMTP_REQTLS_POLICY_ACT_DISABLE;
+#endif
+
+    /*
      * Here we ensure that the iter->addr member refers to a copy of the
      * UNIX-domain pathname, so that smtp_save_session() will cache the
      * connection using the pathname as the physical endpoint name.
@@ -513,9 +649,9 @@ static void smtp_connect_local(SMTP_STATE *state, const char *path)
      * willing to retry after TLS handshake failures here, we downgrade "may"
      * no "none". Nothing is lost, and much waste is avoided.
      * 
-     * We don't know who is authenticating whom, so if a client cert is
-     * available, "encrypt" may be a sensible policy. Otherwise, we also
-     * downgrade "encrypt" to "none", this time just to avoid waste.
+     * If a client cert is available, "encrypt" may be a sensible policy.
+     * Without client cert, "encrypt" and "may" over UNIX-domain sockets are
+     * not useful.
      * 
      * We use smtp_reuse_nexthop() instead of smtp_reuse_addr(), so that we can
      * reuse a SASL-authenticated connection (however unlikely this scenario
@@ -523,7 +659,7 @@ static void smtp_connect_local(SMTP_STATE *state, const char *path)
      * of SASL-unauthenticated connections.
      */
 #ifdef USE_TLS
-    if (!smtp_tls_policy_cache_query(why, state->tls, iter)) {
+    if (!smtp_get_effective_tls_level(why, state)) {
 	msg_warn("TLS policy lookup error for %s/%s: %s",
 		 STR(iter->host), STR(iter->addr), STR(why->reason));
 	return;
@@ -635,6 +771,9 @@ static void smtp_update_addr_list(DNS_RR **addr_list, const char *server_addr,
      * XXX Extend the SMTP_SESSION structure with sockaddr information so that
      * we can avoid repeated string->binary transformations for the same
      * address.
+     * 
+     * XXX SRV support: this should match the port, too, otherwise we may
+     * eliminate too many list entries.
      */
     if ((aierr = hostaddr_to_sockaddr(server_addr, (char *) 0, 0, &res0)) != 0) {
 	msg_warn("hostaddr_to_sockaddr %s: %s",
@@ -665,6 +804,18 @@ static int smtp_reuse_session(SMTP_STATE *state, DNS_RR **addr_list,
     DSN_BUF *why = state->why;
 
     /*
+     * This code is called after server address/port lookup, before
+     * iter->host, iter->addr, iter->rr and iter->mx are assigned concrete
+     * values, and while iter->port still corresponds to the nexthop service,
+     * or the default service configured with smtp_tcp_port or lmtp_tcp_port.
+     * 
+     * When a connection is reused by nexthop/service or by server address/port,
+     * iter->host, iter->addr and iter->port are updated with actual values
+     * from the cached session. Additionally, when a connection is searched
+     * by nexthop/service, iter->rr remains null, and when a connection is
+     * searched by server address/port, iter->rr is updated with an actual
+     * server address/port before the search is made.
+     * 
      * First, search the cache by delivery request nexthop. We truncate the
      * server address list when all the sessions for this destination are
      * used up, to reduce the number of variables that need to be checked
@@ -731,11 +882,9 @@ static int smtp_reuse_session(SMTP_STATE *state, DNS_RR **addr_list,
 	    /* XXX Assume there is no code at the end of this loop. */
 	    continue;
 	}
-	vstring_strcpy(iter->addr, hostaddr.buf);
-	vstring_strcpy(iter->host, SMTP_HNAME(addr));
-	iter->rr = addr;
+	SMTP_ITER_UPDATE_HOST(iter, SMTP_HNAME(addr), hostaddr.buf, addr);
 #ifdef USE_TLS
-	if (!smtp_tls_policy_cache_query(why, state->tls, iter)) {
+	if (!smtp_get_effective_tls_level(why, state)) {
 	    msg_warn("TLS policy lookup error for %s/%s: %s",
 		     STR(iter->dest), STR(iter->host), STR(why->reason));
 	    continue;
@@ -818,6 +967,7 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 	char   *dest_buf;
 	char   *domain;
 	unsigned port;
+	char   *service;
 	DNS_RR *addr_list;
 	DNS_RR *addr;
 	DNS_RR *next;
@@ -825,6 +975,8 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 	int     sess_count;
 	SMTP_SESSION *session;
 	int     lookup_mx;
+	int     non_dns_or_literal;
+	int     i_am_mx;
 	unsigned domain_best_pref;
 	MAI_HOSTADDR_STR hostaddr;
 
@@ -834,8 +986,28 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 	/*
 	 * Parse the destination. If no TCP port is specified, use the port
 	 * that is reserved for the protocol (SMTP or LMTP).
+	 * 
+	 * The 'service' variable corresponds to the remote service specified
+	 * with the nexthop, or the default service configured with
+	 * smtp_tcp_port or lmtp_tcp_port. The 'port' variable and
+	 * SMTP_ITERATOR.port initially correspond to that service. This
+	 * determines what loop prevention will be in effect.
+	 * 
+	 * The SMTP_ITERATOR.port will be overwritten after SRV record lookup.
+	 * This guarantees that the connection cache key contains the correct
+	 * port value when caching and retrieving a connection by its server
+	 * address (and port).
+	 * 
+	 * By design, the connection cache key contains NO port information when
+	 * caching or retrieving a connection by its nexthop destination.
+	 * Instead, the cache key contains the master.cf service name (a
+	 * proxy for all the parameter settings including the default service
+	 * from smtp_tcp_port or lmtp_tcp_port), together with the nexthop
+	 * destination and sender-dependent info. This should be sufficient
+	 * to avoid cross talk between mail streams that should be separated.
 	 */
-	dest_buf = smtp_parse_destination(dest, def_service, &domain, &port);
+	dest_buf = smtp_parse_destination(dest, def_service, &domain,
+					  &service, &port);
 	if (var_helpful_warnings && var_smtp_tls_wrappermode == 0
 	    && ntohs(port) == 465) {
 	    msg_info("SMTPS wrappermode (TCP port 465) requires setting "
@@ -848,32 +1020,83 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 	SMTP_ITER_INIT(iter, dest, NO_HOST, NO_ADDR, port, state);
 
 	/*
-	 * Resolve an SMTP or LMTP server. In the case of SMTP, skip mail
-	 * exchanger lookups when a quoted host is specified or when DNS
-	 * lookups are disabled.
+	 * TODO(wietse) If the domain publishes a TLSRPT policy, they expect
+	 * that clients use SMTP over TLS. Should we upgrade a TLS security
+	 * level of "may" to "encrypt"? This would disable falling back to
+	 * plaintext, and could break interoperability with receivers that
+	 * crank up security up to 11.
+	 * 
+	 * With "TLS-Required: no" in effect, the SMTP client ignores the
+	 * recipient-side policy mechanism TLSRPT, in addition to the already
+	 * ignored DANE and MTA-STS mechanisms. This prevents TLSRPT
+	 * notifications for all SMTP deliveries that do not require TLS.
+	 */
+#ifdef USE_TLSRPT
+	if (smtp_mode && var_smtp_tlsrpt_enable
+	    && STATE_TLS_NOT_REQUIRED(state) == 0
+	    && tls_level_lookup(var_smtp_tls_level) > TLS_LEV_NONE
+	    && !valid_hostaddr(domain, DONT_GRIPE))
+	    smtp_tlsrpt_create_wrapper(state, domain);
+	else
+	    state->tlsrpt = 0;
+#endif						/* USE_TLSRPT */
+
+	/*
+	 * REQUIRETLS policy selection is based on the same TLS net-hop name
+	 * as with certificate matching. When var_reqtls_enable != 0,
+	 * smtp_reqtls_policy must also be != 0.
+	 */
+#ifdef USE_TLS
+	if (STATE_REQTLS_IS_REQUESTED(var_reqtls_enable, state))
+	    state->reqtls_level =
+		smtp_reqtls_policy_eval(smtp_reqtls_policy, domain);
+	else
+	    state->reqtls_level = SMTP_REQTLS_POLICY_ACT_DISABLE;
+#endif
+
+	/*
+	 * Resolve an SMTP or LMTP server. Skip MX or SRV lookups when a
+	 * quoted domain is specified or when DNS lookups are disabled.
 	 */
 	if (msg_verbose)
-	    msg_info("connecting to %s port %d", domain, ntohs(port));
+	    msg_info("connecting to %s service %s", domain, service);
+	non_dns_or_literal = (smtp_dns_support == SMTP_DNS_DISABLED
+			      || *dest == '[');
 	if (smtp_mode) {
 	    if (ntohs(port) == IPPORT_SMTP)
 		state->misc_flags |= SMTP_MISC_FLAG_LOOP_DETECT;
 	    else
 		state->misc_flags &= ~SMTP_MISC_FLAG_LOOP_DETECT;
-	    lookup_mx = (smtp_dns_support != SMTP_DNS_DISABLED && *dest != '[');
+	    lookup_mx = !non_dns_or_literal;
 	} else
 	    lookup_mx = 0;
-	if (!lookup_mx) {
+
+	/*
+	 * Look up SRV and address records and fall back to non-SRV lookups
+	 * if permitted by configuration settings, or look up MX and address
+	 * records, or look up address records only.
+	 */
+	i_am_mx = 0;
+	addr_list = 0;
+	if (!non_dns_or_literal && smtp_use_srv_lookup
+	    && string_list_match(smtp_use_srv_lookup, service)) {
+	    if (lookup_mx)
+		state->misc_flags |= SMTP_MISC_FLAG_FALLBACK_SRV_TO_MX;
+	    else
+		state->misc_flags &= ~SMTP_MISC_FLAG_FALLBACK_SRV_TO_MX;
+	    addr_list = smtp_service_addr(domain, service, &iter->mx,
+					  state->misc_flags, why, &i_am_mx);
+	} else if (!lookup_mx) {
+	    /* Non-DNS, literal, or non-SMTP service */
 	    addr_list = smtp_host_addr(domain, state->misc_flags, why);
 	    /* XXX We could be an MX host for this destination... */
 	} else {
-	    int     i_am_mx = 0;
-
 	    addr_list = smtp_domain_addr(domain, &iter->mx, state->misc_flags,
 					 why, &i_am_mx);
-	    /* If we're MX host, don't connect to non-MX backups. */
-	    if (i_am_mx)
-		state->misc_flags |= SMTP_MISC_FLAG_FINAL_NEXTHOP;
 	}
+	/* If we're MX host, don't connect to non-MX backups. */
+	if (i_am_mx)
+	    state->misc_flags |= SMTP_MISC_FLAG_FINAL_NEXTHOP;
 
 	/*
 	 * Don't try fall-back hosts if mail loops to myself. That would just
@@ -966,11 +1189,9 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 		/* XXX Assume there is no code at the end of this loop. */
 		continue;
 	    }
-	    vstring_strcpy(iter->addr, hostaddr.buf);
-	    vstring_strcpy(iter->host, SMTP_HNAME(addr));
-	    iter->rr = addr;
+	    SMTP_ITER_UPDATE_HOST(iter, SMTP_HNAME(addr), hostaddr.buf, addr);
 #ifdef USE_TLS
-	    if (!smtp_tls_policy_cache_query(why, state->tls, iter)) {
+	    if (!smtp_get_effective_tls_level(why, state)) {
 		msg_warn("TLS policy lookup for %s/%s: %s",
 			 STR(iter->dest), STR(iter->host), STR(why->reason));
 		continue;
@@ -983,7 +1204,21 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 		continue;
 		/* XXX Assume there is no code at the end of this loop. */
 	    }
-	    /* Disable TLS when retrying after a handshake failure */
+	    /* Skip MX hosts that lack authorization. */
+	    if (!smtp_tls_authorize_mx_hostname(state->tls, SMTP_HNAME(addr))) {
+		continue;
+		/* XXX Assume there is no code at the end of this loop. */
+	    }
+
+	    /*
+	     * Disable TLS when retrying after a handshake failure. This must
+	     * never happen when TLS is required. See PLAINTEXT_FALLBACK_OK
+	     * macros.
+	     * 
+	     * By dropping the TLS level after smtp_get_effective_tls_level()
+	     * and smtp_tls_stat_activate_*(), we will properly record the
+	     * fallback for the TLS level etc. in TLS status logging.
+	     */
 	    if (retry_plain) {
 		state->tls->level = TLS_LEV_NONE;
 		retry_plain = 0;
@@ -998,6 +1233,18 @@ static void smtp_connect_inet(SMTP_STATE *state, const char *nexthop,
 		session->state = state;
 #ifdef USE_TLS
 		session->tls_nexthop = domain;
+
+		/*
+		 * Update TLSRPT state even if this is a reused SMTP
+		 * connection. If for some unlikely reason we must report a
+		 * problem, then we must report correct information.
+		 */
+#ifdef USE_TLSRPT
+		if (state->tlsrpt) {
+		    smtp_tlsrpt_set_tls_policy(state);
+		    smtp_tlsrpt_set_tcp_connection(state);
+		}
+#endif						/* USE_TLSRPT */
 #endif
 		if (addr->pref == domain_best_pref)
 		    session->features |= SMTP_FEATURE_BEST_MX;

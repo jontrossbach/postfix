@@ -13,22 +13,22 @@
 /*	} BOUNCE_INFO;
 /*
 /*	BOUNCE_INFO *bounce_mail_init(service, queue_name, queue_id, encoding,
-/*					smtputf8, dsn_envid, template)
+/*					sendopts, dsn_envid, template)
 /*	const char *service;
 /*	const char *queue_name;
 /*	const char *queue_id;
 /*	const char *encoding;
-/*	int	smtputf8;
+/*	int	sendopts;
 /*	const char *dsn_envid;
 /*	const BOUNCE_TEMPLATE *template;
 /*
 /*	BOUNCE_INFO *bounce_mail_one_init(queue_name, queue_id, encoding,
-/*					smtputf8, dsn_envid, dsn_notify,
+/*					sendopts, dsn_envid, dsn_notify,
 /*					rcpt_buf, dsn_buf, template)
 /*	const char *queue_name;
 /*	const char *queue_id;
 /*	const char *encoding;
-/*	int	smtputf8;
+/*	int	sendopts;
 /*	int	dsn_notify;
 /*	const char *dsn_envid;
 /*	RCPT_BUF *rcpt_buf;
@@ -160,6 +160,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -206,12 +209,14 @@
 #include <deliver_completed.h>
 #include <dsn_mask.h>
 #include <smtputf8.h>
+#include <header_opts.h>
 
 /* Application-specific. */
 
 #include "bounce_service.h"
 
 #define STR vstring_str
+#define LEN VSTRING_LEN
 
 /* bounce_mail_alloc - initialize */
 
@@ -219,7 +224,7 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
 				              const char *queue_name,
 				              const char *queue_id,
 				              const char *encoding,
-				              int smtputf8,
+				              int sendopts,
 				              const char *dsn_envid,
 				              RCPT_BUF *rcpt_buf,
 				              DSN_BUF *dsn_buf,
@@ -228,6 +233,7 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
 {
     BOUNCE_INFO *bounce_info;
     int     rec_type;
+    int     skip_message_segment = 0;
 
     /*
      * Bundle up a bunch of parameters and initialize information that will
@@ -241,7 +247,7 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
     bounce_info->service = service;
     bounce_info->queue_name = queue_name;
     bounce_info->queue_id = queue_id;
-    bounce_info->smtputf8 = smtputf8;
+    bounce_info->sendopts = sendopts;
     /* Fix 20140708: override MIME encoding: addresses may be 8bit. */
     /* Fix 20140718: override MIME encoding: 8bit $myhostname expansion. */
     if (var_smtputf8_enable /* was: bounce_info->smtputf8 */ ) {
@@ -266,6 +272,7 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
     bounce_info->arrival_time = 0;
     bounce_info->orig_offs = 0;
     bounce_info->message_size = 0;
+    bounce_info->orig_msgid = vstring_alloc(100);
     bounce_info->rcpt_buf = rcpt_buf;
     bounce_info->dsn_buf = dsn_buf;
     bounce_info->log_handle = log_handle;
@@ -315,8 +322,8 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
 		    DELIVER_LOCK_MODE) < 0)
 	    msg_fatal("cannot get shared lock on %s: %m",
 		      VSTREAM_PATH(bounce_info->orig_fp));
-	while ((rec_type = rec_get(bounce_info->orig_fp,
-				   bounce_info->buf, 0)) > 0) {
+	while ((rec_type =
+		rec_get(bounce_info->orig_fp, bounce_info->buf, 0)) > 0) {
 
 	    /*
 	     * Postfix version dependent: data offset in SIZE record.
@@ -348,7 +355,8 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
 		quote_822_local_flags(bounce_info->sender,
 				      VSTRING_LEN(bounce_info->buf) ?
 				      STR(bounce_info->buf) :
-				      mail_addr_mail_daemon(), 0);
+				      mail_addr_mail_daemon(),
+				      QUOTE_FLAG_8BITCLEAN);
 	    }
 
 	    /*
@@ -360,12 +368,53 @@ static BOUNCE_INFO *bounce_mail_alloc(const char *service,
 		    msg_warn("%s: no sender before message content record",
 			     bounce_info->queue_id);
 		bounce_info->orig_offs = vstream_ftell(bounce_info->orig_fp);
-		break;
+		skip_message_segment = 1;
 	    }
+
+	    /*
+	     * Extract Message-ID from extracted segment, for use in threaded
+	     * bounces.
+	     */
+	    else if (rec_type == REC_TYPE_ATTR && var_threaded_bounce) {
+		char   *cp = STR(bounce_info->buf);
+		ssize_t len = sizeof(MAIL_ATTR_MESSAGE_ID);
+		char   *err;
+
+		if (strncmp(cp, MAIL_ATTR_MESSAGE_ID "=", len) == 0) {
+		    cp += len;
+		    if ((err = extpar(&cp, "<>", EXTPAR_FLAG_NONE)) != 0) {
+			msg_warn("%s: malformed Message-ID attribute: %s",
+				 bounce_info->queue_id, err);
+			myfree(err);
+		    } else {
+			vstring_sprintf(bounce_info->orig_msgid, "<%s>", cp);
+		    }
+		}
+	    }
+
+	    /*
+	     * Are we done yet?
+	     */
 	    if (bounce_info->orig_offs > 0
 		&& bounce_info->arrival_time > 0
-		&& VSTRING_LEN(bounce_info->sender) > 0)
+		&& VSTRING_LEN(bounce_info->sender) > 0
+		&& (var_threaded_bounce == 0
+		    || VSTRING_LEN(bounce_info->orig_msgid) > 0)) {
 		break;
+	    }
+
+	    /*
+	     * Skip over (the remainder of) the message segment. If that
+	     * fails, degrade.
+	     */
+	    if (skip_message_segment) {
+		if (vstream_fseek(bounce_info->orig_fp,
+				  bounce_info->orig_offs +
+				  bounce_info->message_size,
+				  SEEK_SET) < 0)
+		     /* void */ ;
+		skip_message_segment = 0;
+	    }
 	}
     }
     return (bounce_info);
@@ -377,7 +426,7 @@ BOUNCE_INFO *bounce_mail_init(const char *service,
 			              const char *queue_name,
 			              const char *queue_id,
 			              const char *encoding,
-			              int smtputf8,
+			              int sendopts,
 			              const char *dsn_envid,
 			              BOUNCE_TEMPLATE *template)
 {
@@ -404,7 +453,7 @@ BOUNCE_INFO *bounce_mail_init(const char *service,
 	dsn_buf = dsb_create();
     }
     bounce_info = bounce_mail_alloc(service, queue_name, queue_id, encoding,
-				    smtputf8, dsn_envid, rcpt_buf, dsn_buf,
+				    sendopts, dsn_envid, rcpt_buf, dsn_buf,
 				    template, log_handle);
     return (bounce_info);
 }
@@ -414,7 +463,7 @@ BOUNCE_INFO *bounce_mail_init(const char *service,
 BOUNCE_INFO *bounce_mail_one_init(const char *queue_name,
 				          const char *queue_id,
 				          const char *encoding,
-				          int smtputf8,
+				          int sendopts,
 				          const char *dsn_envid,
 				          RCPT_BUF *rcpt_buf,
 				          DSN_BUF *dsn_buf,
@@ -426,7 +475,7 @@ BOUNCE_INFO *bounce_mail_one_init(const char *queue_name,
      * Initialize the bounce_info structure for just one recipient.
      */
     bounce_info = bounce_mail_alloc("none", queue_name, queue_id, encoding,
-				    smtputf8, dsn_envid, rcpt_buf, dsn_buf,
+				    sendopts, dsn_envid, rcpt_buf, dsn_buf,
 				    template, (BOUNCE_LOG *) 0);
     return (bounce_info);
 }
@@ -439,6 +488,7 @@ void    bounce_mail_free(BOUNCE_INFO *bounce_info)
 	if (bounce_log_close(bounce_info->log_handle))
 	    msg_warn("%s: read bounce log %s: %m",
 		     bounce_info->queue_id, bounce_info->queue_id);
+	vstring_free(bounce_info->orig_msgid);
 	rcpb_free(bounce_info->rcpt_buf);
 	dsb_free(bounce_info->dsn_buf);
     }
@@ -473,6 +523,23 @@ int     bounce_header(VSTREAM *bounce, BOUNCE_INFO *bounce_info,
     bounce_template_headers(post_mail_fprintf, bounce, template,
 			    STR(quote_822_local(bounce_info->buf, dest)),
 			    postmaster_copy);
+
+    /*
+     * References and Reply-To header that references the original message-id
+     * for better threading in MUAs.
+     */
+    if (VSTRING_LEN(bounce_info->orig_msgid) > 0) {
+	post_mail_fprintf(bounce, "References: %s", STR(bounce_info->orig_msgid));
+	post_mail_fprintf(bounce, "In-Reply-To: %s", STR(bounce_info->orig_msgid));
+    }
+
+    /*
+     * Trade confidentiality against availability. See also up-stream code in
+     * edit_notification_properties().
+     */
+    if (var_tls_required_enable
+	&& (bounce_info->sendopts & SOPT_REQUIRETLS_HEADER) != 0)
+	post_mail_fprintf(bounce, "TLS-Required: no");
 
     /*
      * Auto-Submitted header, as per RFC 3834.
@@ -639,12 +706,12 @@ int     bounce_header_dsn(VSTREAM *bounce, BOUNCE_INFO *bounce_info)
 		      "Delivery report");
     /* Generate *global* only if the original requested SMTPUTF8 support. */
     post_mail_fprintf(bounce, "Content-Type: message/%sdelivery-status",
-		      (bounce_info->smtputf8 & SMTPUTF8_FLAG_REQUESTED) ?
+		      (bounce_info->sendopts & SMTPUTF8_FLAG_REQUESTED) ?
 		      "global-" : "");
     /* Fix 20140709: addresses may be 8bit. */
     if (NOT_7BIT_MIME(bounce_info)
     /* BC Fix 20170610: prevent MIME downgrade of message/delivery-status. */
-	&& (bounce_info->smtputf8 & SMTPUTF8_FLAG_REQUESTED))
+	&& (bounce_info->sendopts & SMTPUTF8_FLAG_REQUESTED))
 	post_mail_fprintf(bounce, "Content-Transfer-Encoding: %s",
 			  bounce_info->mime_encoding);
 
@@ -666,15 +733,15 @@ int     bounce_header_dsn(VSTREAM *bounce, BOUNCE_INFO *bounce_info)
     post_mail_fprintf(bounce, "X-%s-Queue-ID: %s",
 		      bounce_info->mail_name, bounce_info->queue_id);
 
-#define IS_UTF8_ADDRESS(str, len) \
-	((str)[0] != 0 && !allascii(str) && valid_utf8_string((str), (len)))
+#define IS_UTF8_ADDRESS(str) \
+	((str)[0] != 0 && !allascii(str) && valid_utf8_stringz(str))
 
     /* Fix 20140708: use "utf-8" or "rfc822" as appropriate. */
     if (VSTRING_LEN(bounce_info->sender) > 0)
 	post_mail_fprintf(bounce, "X-%s-Sender: %s; %s",
-			  bounce_info->mail_name, bounce_info->smtputf8
-			  && IS_UTF8_ADDRESS(STR(bounce_info->sender),
-					 VSTRING_LEN(bounce_info->sender)) ?
+			  bounce_info->mail_name,
+			  (bounce_info->sendopts & SMTPUTF8_FLAG_ALL)
+			  && IS_UTF8_ADDRESS(STR(bounce_info->sender)) ?
 			  "utf-8" : "rfc822", STR(bounce_info->sender));
     if (bounce_info->arrival_time > 0)
 	post_mail_fprintf(bounce, "Arrival-Date: %s",
@@ -692,9 +759,8 @@ int     bounce_recipient_dsn(VSTREAM *bounce, BOUNCE_INFO *bounce_info)
     post_mail_fputs(bounce, "");
     /* Fix 20140708: Don't send "utf-8" type with non-UTF8 address. */
     post_mail_fprintf(bounce, "Final-Recipient: %s; %s",
-		      bounce_info->smtputf8
-		      && IS_UTF8_ADDRESS(rcpt->address,
-					 strlen(rcpt->address)) ?
+		      (bounce_info->sendopts & SMTPUTF8_FLAG_ALL)
+		      && IS_UTF8_ADDRESS(rcpt->address) ?
 		      "utf-8" : "rfc822", rcpt->address);
 
     /*
@@ -709,7 +775,7 @@ int     bounce_recipient_dsn(VSTREAM *bounce, BOUNCE_INFO *bounce_info)
      * relayed.". Postfix adds an ORCPT parameter under these conditions.
      * 
      * Therefore, all down-stream MTAs will send DSNs with Original-Recipient
-     * field ontaining this same ORCPT value. When a down-stream MTA can use
+     * field containing this same ORCPT value. When a down-stream MTA can use
      * that information in their DSNs, it makes no sense that an up-stream
      * MTA can't use that same information in its own DSNs.
      * 
@@ -721,9 +787,8 @@ int     bounce_recipient_dsn(VSTREAM *bounce, BOUNCE_INFO *bounce_info)
     } else if (NON_NULL_EMPTY(rcpt->orig_addr)) {
 	/* Fix 20140708: Don't send "utf-8" type with non-UTF8 address. */
 	post_mail_fprintf(bounce, "Original-Recipient: %s; %s",
-			  bounce_info->smtputf8
-			  && IS_UTF8_ADDRESS(rcpt->orig_addr,
-					     strlen(rcpt->orig_addr)) ?
+			  (bounce_info->sendopts & SMTPUTF8_FLAG_ALL)
+			  && IS_UTF8_ADDRESS(rcpt->orig_addr) ?
 			  "utf-8" : "rfc822", rcpt->orig_addr);
     }
     post_mail_fprintf(bounce, "Action: %s",
@@ -817,7 +882,7 @@ int     bounce_original(VSTREAM *bounce, BOUNCE_INFO *bounce_info,
 		      headers_only == DSN_RET_HDRS ?
 		      "Message Headers" : "Message");
     /* Generate *global* only if the original requested SMTPUTF8 support. */
-    if (bounce_info->smtputf8 & SMTPUTF8_FLAG_REQUESTED)
+    if (bounce_info->sendopts & SMTPUTF8_FLAG_REQUESTED)
 	post_mail_fprintf(bounce, "Content-Type: message/%s",
 			  headers_only == DSN_RET_HDRS ?
 			  "global-headers" : "global");

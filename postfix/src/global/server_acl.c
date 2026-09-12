@@ -19,7 +19,7 @@
 /*	SERVER_ACL *intern_acl;
 /*	const char *param_name;
 /* DESCRIPTION
-/*	This module implements a permanent black/whitelist that
+/*	This module implements a permanent allow/denylist that
 /*	is meant to be evaluated immediately after a client connects
 /*	to a server.
 /*
@@ -64,6 +64,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -112,7 +115,7 @@ void    server_acl_pre_jail_init(const char *mynetworks, const char *origin)
     if (warn_compat_break_mynetworks_style)
 	server_acl_mynetworks_host =
 	    addr_match_list_init(origin, MATCH_FLAG_RETURN
-				 | match_parent_style(origin), mynetworks_host());
+			   | match_parent_style(origin), mynetworks_host());
 }
 
 /* server_acl_parse - parse access list */
@@ -141,10 +144,9 @@ SERVER_ACL *server_acl_parse(const char *extern_acl, const char *origin)
 		argv_add(intern_acl, SERVER_ACL_NAME_DUNNO, (char *) 0);
 		break;
 	    } else {
-		if (dict_handle(acl) == 0)
-		    dict_register(acl, dict_open(acl, O_RDONLY, DICT_FLAG_LOCK
-						 | DICT_FLAG_FOLD_FIX
-						 | DICT_FLAG_UTF8_REQUEST));
+		acl = dict_open(acl, O_RDONLY, DICT_FLAG_LOCK
+				| DICT_FLAG_FOLD_FIX
+				| DICT_FLAG_UTF8_REQUEST)->reg_name;
 	    }
 	}
 	argv_add(intern_acl, acl, (char *) 0);
@@ -212,8 +214,9 @@ int     server_acl_eval(const char *client_addr, SERVER_ACL * intern_acl,
 		if (ret != SERVER_ACL_ACT_DUNNO)
 		    return (ret);
 	    } else if (dict->error != 0) {
-		msg_warn("%s: %s: table lookup error -- ignoring the remainder "
-			 "of this access list", origin, acl);
+		msg_warn("%s: %s:%s: table lookup error -- ignoring the "
+			 "remainder of this access list", origin, dict->type,
+			 dict->name);
 		return (SERVER_ACL_ACT_ERROR);
 	    }
 	} else if (STREQ(acl, SERVER_ACL_NAME_DUNNO)) {
@@ -240,7 +243,7 @@ int     server_acl_eval(const char *client_addr, SERVER_ACL * intern_acl,
 #include <vstring_vstream.h>
 #include <name_code.h>
 #include <split_at.h>
-    
+
 char   *var_server_acl = "";
 
 #define UPDATE_VAR(s,v) do { if (*(s)) myfree(s); (s) = mystrdup(v); } while (0)

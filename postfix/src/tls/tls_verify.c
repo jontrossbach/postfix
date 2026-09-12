@@ -11,8 +11,9 @@
 /*	int	ok;
 /*	X509_STORE_CTX *ctx;
 /*
-/*	int     tls_log_verify_error(TLScontext)
+/*	int     tls_log_verify_error(TLScontext, tlsrpt)
 /*	TLS_SESS_STATE *TLScontext;
+/*	struct TLSRPT_WRAPPER *tlsrpt;
 /*
 /*	char *tls_peer_CN(peercert, TLScontext)
 /*	X509   *peercert;
@@ -89,6 +90,9 @@
 /*
 /*	Victor Duchovni
 /*	Morgan Stanley
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -107,17 +111,35 @@
 
 /* TLS library. */
 
+#ifdef USE_TLSRPT
+#include <tlsrpt_wrapper.h>
+#endif
+
 #define TLS_INTERNAL
 #include <tls.h>
 
 /* update_error_state - safely stash away error state */
 
-static void update_error_state(TLS_SESS_STATE *TLScontext, int depth,
-			               X509 *errorcert, int errorcode)
+static void update_error_state(X509_STORE_CTX *ctx, TLS_SESS_STATE *TLScontext,
+		            int depth, const X509 *errorcert, int errorcode)
 {
-    /* No news is good news */
-    if (TLScontext->errordepth >= 0 && TLScontext->errordepth <= depth)
-	return;
+
+    /*
+     * Report the error that is closest to the leaf certificate, any errors
+     * higher up the chain are immaterial until the "inner" errors are fixed.
+     * 
+     * We special-case "X509_V_ERR_HOSTNAME_MISMATCH" (at depth 0) in order to
+     * distinguish between untrusted certificates and trusted certificates
+     * with a hostname mismatch.  Any other error has a higher priority.
+     */
+    if (TLScontext->errordepth >= 0) {
+	if ((TLScontext->errordepth <= depth &&
+	     TLScontext->errorcode != X509_V_ERR_HOSTNAME_MISMATCH) ||
+	    errorcode == X509_V_ERR_HOSTNAME_MISMATCH) {
+	    X509_STORE_CTX_set_error(ctx, TLScontext->errorcode);
+	    return;
+	}
+    }
 
     /*
      * The certificate pointer is stable during the verification callback,
@@ -126,9 +148,9 @@ static void update_error_state(TLS_SESS_STATE *TLScontext, int depth,
      * being there until later.
      */
     if (TLScontext->errorcert != 0)
-	X509_free(TLScontext->errorcert);
+	X509_free((X509 *) TLScontext->errorcert);
     if (errorcert != 0)
-	X509_up_ref(errorcert);
+	X509_up_ref((X509 *) errorcert);
     TLScontext->errorcert = errorcert;
     TLScontext->errorcode = errorcode;
     TLScontext->errordepth = depth;
@@ -139,11 +161,12 @@ static void update_error_state(TLS_SESS_STATE *TLScontext, int depth,
 int     tls_verify_certificate_callback(int ok, X509_STORE_CTX *ctx)
 {
     char    buf[CCERT_BUFSIZ];
-    X509   *cert;
+    const X509 *cert;
     int     err;
     int     depth;
     SSL    *con;
     TLS_SESS_STATE *TLScontext;
+    EVP_PKEY *rpk = 0;
 
     /* May be NULL as of OpenSSL 1.0, thanks for the API change! */
     cert = X509_STORE_CTX_get_current_cert(ctx);
@@ -151,6 +174,10 @@ int     tls_verify_certificate_callback(int ok, X509_STORE_CTX *ctx)
     con = X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
     TLScontext = SSL_get_ex_data(con, TLScontext_index);
     depth = X509_STORE_CTX_get_error_depth(ctx);
+#if OPENSSL_VERSION_PREREQ(3,2)
+    if (cert == 0)
+	rpk = X509_STORE_CTX_get0_rpk(ctx);
+#endif
 
     /*
      * Transient failures to load the (DNS or synthetic TLSA) trust settings
@@ -166,37 +193,72 @@ int     tls_verify_certificate_callback(int ok, X509_STORE_CTX *ctx)
     if (TLScontext->must_fail) {
 	if (depth == 0) {
 	    X509_STORE_CTX_set_error(ctx, err = X509_V_ERR_UNSPECIFIED);
-	    update_error_state(TLScontext, depth, cert, err);
+	    update_error_state(ctx, TLScontext, depth, cert, err);
 	}
 	return (1);
     }
     if (ok == 0)
-	update_error_state(TLScontext, depth, cert, err);
+	update_error_state(ctx, TLScontext, depth, cert, err);
 
     if (TLScontext->log_mask & TLS_LOG_VERBOSE) {
-	if (cert)
+	if (cert) {
 	    X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf));
-	else
-	    strcpy(buf, "<unknown>");
-	msg_info("%s: depth=%d verify=%d subject=%s",
-		 TLScontext->namaddr, depth, ok, printable(buf, '?'));
+	    msg_info("%s: depth=%d verify=%d subject=%s",
+		     TLScontext->namaddr, depth, ok, printable(buf, '?'));
+	} else if (rpk) {
+	    msg_info("%s: verify=%d raw public key", TLScontext->namaddr, ok);
+	} else {
+	    msg_info("%s: depth=%d verify=%d", TLScontext->namaddr, depth, ok);
+	}
     }
     return (1);
 }
 
 /* tls_log_verify_error - Report final verification error status */
 
-void    tls_log_verify_error(TLS_SESS_STATE *TLScontext)
+void    tls_log_verify_error(TLS_SESS_STATE *TLScontext,
+			             struct TLSRPT_WRAPPER *tlsrpt)
 {
     char    buf[CCERT_BUFSIZ];
     int     err = TLScontext->errorcode;
-    X509   *cert = TLScontext->errorcert;
+    const X509 *cert = TLScontext->errorcert;
     int     depth = TLScontext->errordepth;
+
+#ifdef USE_TLSRPT
+    VSTRING *err_vstr = vstring_alloc(100);
+
+#define CERT_ERROR_TO_STRING(err) \
+    translit(vstring_str(vstring_strcpy(err_vstr, \
+					X509_verify_cert_error_string(err))), \
+	     " ", "_")
+#endif
 
 #define PURPOSE ((depth>0) ? "CA": TLScontext->am_server ? "client": "server")
 
     if (err == X509_V_OK)
 	return;
+
+    /*
+     * If an external policy flagged an error, report that instead.
+     */
+    if (TLScontext->ffail_type) {
+	msg_info("certificate verification failed for %s: "
+		 "external policy failure (%s)",
+		 TLScontext->namaddr, TLScontext->ffail_type);
+#ifdef USE_TLSRPT
+	if (tlsrpt) {
+	    tlsrpt_failure_t failure_type;
+
+	    if ((failure_type = convert_tlsrpt_policy_failure(TLScontext->ffail_type)) < 0)
+		msg_panic("tls_log_verify_error: unexpected failure_reason: %s",
+			  TLScontext->ffail_type);
+	    trw_report_failure(tlsrpt, failure_type,
+			        /* additional_info= */ (char *) 0,
+			        /* failure_reason= */ (char *) 0);
+	}
+#endif
+	return;
+    }
 
     /*
      * Specific causes for verification failure.
@@ -210,10 +272,22 @@ void    tls_log_verify_error(TLS_SESS_STATE *TLScontext)
 	 */
 	msg_info("certificate verification failed for %s: "
 		 "not trusted by local or TLSA policy", TLScontext->namaddr);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_CERTIFICATE_NOT_TRUSTED,
+			        /* additional_info= */ (char *) 0,
+			        /* failure_code= */ (char *) 0);
+#endif
 	break;
     case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
 	msg_info("certificate verification failed for %s: "
 		 "self-signed certificate", TLScontext->namaddr);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       CERT_ERROR_TO_STRING(err));
+#endif
 	break;
     case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY:
     case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
@@ -229,25 +303,55 @@ void    tls_log_verify_error(TLS_SESS_STATE *TLScontext)
 	    strcpy(buf, "<unknown>");
 	msg_info("certificate verification failed for %s: untrusted issuer %s",
 		 TLScontext->namaddr, printable(buf, '?'));
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       CERT_ERROR_TO_STRING(err));
+#endif
 	break;
     case X509_V_ERR_CERT_NOT_YET_VALID:
     case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
 	msg_info("%s certificate verification failed for %s: certificate not"
 		 " yet valid", PURPOSE, TLScontext->namaddr);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       CERT_ERROR_TO_STRING(err));
+#endif
 	break;
     case X509_V_ERR_CERT_HAS_EXPIRED:
     case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
 	msg_info("%s certificate verification failed for %s: certificate has"
 		 " expired", PURPOSE, TLScontext->namaddr);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_CERTIFICATE_EXPIRED,
+			        /* additional_info= */ (char *) 0,
+			        /* failure_code= */ (char *) 0);
+#endif
 	break;
     case X509_V_ERR_INVALID_PURPOSE:
 	msg_info("certificate verification failed for %s: not designated for "
 		 "use as a %s certificate", TLScontext->namaddr, PURPOSE);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       CERT_ERROR_TO_STRING(err));
+#endif
 	break;
     case X509_V_ERR_CERT_CHAIN_TOO_LONG:
 	msg_info("certificate verification failed for %s: "
 		 "certificate chain longer than limit(%d)",
 		 TLScontext->namaddr, depth - 1);
+#ifdef USE_TLSRPT
+	if (tlsrpt)
+	    trw_report_failure(tlsrpt, TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       CERT_ERROR_TO_STRING(err));
+#endif
 	break;
     default:
 	msg_info("%s certificate verification failed for %s: num=%d:%s",
@@ -255,6 +359,9 @@ void    tls_log_verify_error(TLS_SESS_STATE *TLScontext)
 		 X509_verify_cert_error_string(err));
 	break;
     }
+#ifdef USE_TLSRPT
+    vstring_free(err_vstr);
+#endif
 }
 
 #ifndef DONT_GRIPE
@@ -264,20 +371,20 @@ void    tls_log_verify_error(TLS_SESS_STATE *TLScontext)
 
 /* tls_text_name - extract certificate property value by name */
 
-static char *tls_text_name(X509_NAME *name, int nid, const char *label,
+static char *tls_text_name(const X509_NAME *name, int nid, const char *label,
 			        const TLS_SESS_STATE *TLScontext, int gripe)
 {
     const char *myname = "tls_text_name";
     int     pos;
-    X509_NAME_ENTRY *entry;
-    ASN1_STRING *entry_str;
+    const X509_NAME_ENTRY *entry;
+    const ASN1_STRING *entry_str;
     int     asn1_type;
     int     utf8_length;
     unsigned char *utf8_value;
     int     ch;
     unsigned char *cp;
 
-    if (name == 0 || (pos = X509_NAME_get_index_by_NID(name, nid, -1)) < 0) {
+    if (name == 0 || (pos = X509_NAME_get_index_by_NID((X509_NAME *) name, nid, -1)) < 0) {
 	if (gripe != DONT_GRIPE) {
 	    msg_warn("%s: %s: peer certificate has no %s",
 		     myname, TLScontext->namaddr, label);
@@ -406,7 +513,7 @@ char   *tls_peer_CN(X509 *peercert, const TLS_SESS_STATE *TLScontext)
 
 char   *tls_issuer_CN(X509 *peer, const TLS_SESS_STATE *TLScontext)
 {
-    X509_NAME *name;
+    const X509_NAME *name;
     char   *cn;
 
     name = X509_get_issuer_name(peer);

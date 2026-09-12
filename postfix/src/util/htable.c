@@ -93,8 +93,7 @@
 /*	htable_sequence() returns the first or next element depending
 /*	on the value of the "how" argument.  Specify HTABLE_SEQ_FIRST
 /*	to start a new sequence, HTABLE_SEQ_NEXT to continue, and
-/*	HTABLE_SEQ_STOP to terminate a sequence early.  The caller
-/*	must not delete an element before it is visited.
+/*	HTABLE_SEQ_STOP to terminate a sequence early.
 /* RESTRICTIONS
 /*	A callback function should not modify the hash table that is
 /*	specified to its caller.
@@ -104,6 +103,7 @@
 /*	to delete a non-existent entry.
 /* SEE ALSO
 /*	mymalloc(3) memory management wrapper
+/*	hash_fnv(3) Fowler/Noll/Vo hash function
 /* LICENSE
 /* .ad
 /* .fi
@@ -113,6 +113,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* C library */
@@ -127,6 +132,13 @@
 #include "htable.h"
 
 /* htable_hash - hash a string */
+
+#ifndef NO_HASH_FNV
+#include "hash_fnv.h"
+
+#define htable_hash(s, size) (hash_fnvz(s) % (size))
+
+#else
 
 static size_t htable_hash(const char *s, size_t size)
 {
@@ -146,6 +158,8 @@ static size_t htable_hash(const char *s, size_t size)
     }
     return (h % size);
 }
+
+#endif
 
 /* htable_link - insert element into table */
 
@@ -257,7 +271,7 @@ HTABLE_INFO *htable_locate(HTABLE *table, const char *key)
 void    htable_delete(HTABLE *table, const char *key, void (*free_fn) (void *))
 {
     if (table) {
-	HTABLE_INFO *ht;
+	HTABLE_INFO *ht, **sp;
 	HTABLE_INFO **h = table->data + htable_hash(key, table->size);
 
 #define	STREQ(x,y) (x == y || (x[0] == y[0] && strcmp(x,y) == 0))
@@ -275,6 +289,14 @@ void    htable_delete(HTABLE *table, const char *key, void (*free_fn) (void *))
 		if (free_fn && ht->value)
 		    (*free_fn) (ht->value);
 		myfree((void *) ht);
+		/* In case the first/next iterator has not yet visited it */
+		for (sp = table->seq_element; sp && *sp; sp++) {
+		    if (*sp == ht) {
+			while ((*sp = sp[1]) != 0)
+			    sp += 1;
+			break;
+		    }
+		}
 		return;
 	    }
 	}
@@ -359,7 +381,7 @@ HTABLE_INFO *htable_sequence(HTABLE *table, int how)
 	    myfree((void *) table->seq_bucket);
 	table->seq_bucket = htable_list(table);
 	table->seq_element = table->seq_bucket;
-	return (*(table->seq_element)++);
+	/* FALLTHROUGH */
     case HTABLE_SEQ_NEXT:			/* next element */
 	if (table->seq_element && *table->seq_element)
 	    return (*(table->seq_element)++);
@@ -395,6 +417,9 @@ int     main(int unused_argc, char **unused_argv)
     hash = htable_create(10);
     while (vstring_get(buf, VSTREAM_IN) != VSTREAM_EOF)
 	htable_enter(hash, vstring_str(buf), CAST_INT_TO_VOID_PTR(count++));
+    if (count != hash->used)
+	msg_panic("%ld entries stored, but %lu entries exist",
+		  (long) count, (unsigned long) hash->used);
     for (i = 0, op = HTABLE_SEQ_FIRST; htable_sequence(hash, op) != 0;
 	 i++, op = HTABLE_SEQ_NEXT)
 	 /* void */ ;

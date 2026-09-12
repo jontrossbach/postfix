@@ -66,7 +66,7 @@ Symptoms of Postfix SMTP server overload are:
      condition, increase the process count in master.cf or reduce the
      service time per client
     Oct  3 20:39:27 spike postfix/master[28905]: warning: see
-      http://www.postfix.org/STRESS_README.html for examples of
+      https://www.postfix.org/STRESS_README.html for examples of
       stress-adapting configuration settings
 
 Legitimate mail that doesn't get through during an episode of Postfix SMTP
@@ -259,7 +259,7 @@ to Postfix.
     maps. The Postfix SMTP server will reject mail and disconnect without
     waiting for the remote SMTP client to send a QUIT command.
 
-  * To hang up connections from blacklisted zombies, you can set specific
+  * To hang up connections from denylisted zombies, you can set specific
     Postfix SMTP server reject codes for specific RBLs, and for individual
     responses from specific RBLs. We'll use zen.spamhaus.org as an example; by
     the time you read this document, details may have changed. Right now, their
@@ -299,7 +299,7 @@ to Postfix.
 
   * You can automatically turn on the above overload measure with Postfix 2.5
     and later, or with earlier releases that contain the stress-adaptive
-    behavior source code patch from the mirrors listed at http://
+    behavior source code patch from the mirrors listed at https://
     www.postfix.org/download.html. Simply replace line above 8 with:
 
      8      rbl_reply_maps = ${stress?hash:/etc/postfix/rbl_reply_maps}
@@ -311,7 +311,7 @@ TTeemmppoorraarryy mmeeaassuurreess ffoorr oollddeerr P
 
 See the section "Automatic stress-adaptive behavior" if you are running Postfix
 version 2.5 or later, or if you have applied the source code patch for stress-
-adaptive behavior from the mirrors listed at http://www.postfix.org/
+adaptive behavior from the mirrors listed at https://www.postfix.org/
 download.html.
 
 The following measures can be applied temporarily during overload. They still
@@ -410,7 +410,7 @@ OOtthheerr mmeeaassuurreess ttoo ooffff--llooaadd zzoom
 
 The postscreen(8) daemon, introduced with Postfix 2.8, provides additional
 protection against mail server overload. One postscreen(8) process handles
-multiple inbound SMTP connections, and decides which clients may to talk to a
+multiple inbound SMTP connections, and decides which clients may talk to a
 Postfix SMTP server process. By keeping spambots away, postscreen(8) leaves
 more SMTP server processes available for legitimate clients, and delays the
 onset of server overload conditions.

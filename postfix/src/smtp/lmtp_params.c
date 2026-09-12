@@ -4,6 +4,7 @@
 	VAR_BESTMX_TRANSP, DEF_BESTMX_TRANSP, &var_bestmx_transp, 0, 0,
 	VAR_ERROR_RCPT, DEF_ERROR_RCPT, &var_error_rcpt, 1, 0,
 	VAR_LMTP_SASL_PASSWD, DEF_LMTP_SASL_PASSWD, &var_smtp_sasl_passwd, 0, 0,
+	VAR_LMTP_SASL_PASSWD_RES_DELIM, DEF_LMTP_SASL_PASSWD_RES_DELIM, &var_smtp_sasl_passwd_res_delim, 1, 1,
 	VAR_LMTP_SASL_OPTS, DEF_LMTP_SASL_OPTS, &var_smtp_sasl_opts, 0, 0,
 	VAR_LMTP_SASL_PATH, DEF_LMTP_SASL_PATH, &var_smtp_sasl_path, 0, 0,
 #ifdef USE_TLS
@@ -30,6 +31,7 @@
 	VAR_LMTP_TLS_ECCERT_FILE, DEF_LMTP_TLS_ECCERT_FILE, &var_smtp_tls_eccert_file, 0, 0,
 	VAR_LMTP_TLS_ECKEY_FILE, DEF_LMTP_TLS_ECKEY_FILE, &var_smtp_tls_eckey_file, 0, 0,
 	VAR_LMTP_TLS_LOGLEVEL, DEF_LMTP_TLS_LOGLEVEL, &var_smtp_tls_loglevel, 0, 0,
+	VAR_LMTP_TLS_LOGLEVEL_MAPS, DEF_LMTP_TLS_LOGLEVEL_MAPS, &var_smtp_tls_loglevel_maps, 0, 0,
 	VAR_LMTP_TLS_SNI, DEF_LMTP_TLS_SNI, &var_smtp_tls_sni, 0, 0,
 #endif
 	VAR_LMTP_SASL_MECHS, DEF_LMTP_SASL_MECHS, &var_smtp_sasl_mechs, 0, 0,
@@ -64,6 +66,10 @@
 	VAR_LMTP_DSN_FILTER, DEF_LMTP_DSN_FILTER, &var_smtp_dsn_filter, 0, 0,
 	VAR_LMTP_DNS_RE_FILTER, DEF_LMTP_DNS_RE_FILTER, &var_smtp_dns_re_filter, 0, 0,
 	VAR_TLSPROXY_SERVICE, DEF_TLSPROXY_SERVICE, &var_tlsproxy_service, 1, 0,
+	VAR_HFROM_FORMAT, DEF_HFROM_FORMAT, &var_hfrom_format, 1, 0,
+	VAR_USE_SRV_LOOKUP, DEF_USE_SRV_LOOKUP, &var_use_srv_lookup, 0, 0,
+	VAR_LMTP_TLSRPT_SOCKNAME, DEF_LMTP_TLSRPT_SOCKNAME, &var_smtp_tlsrpt_sockname, 0, 0,
+	VAR_LMTP_REQTLS_POLICY, DEF_LMTP_REQTLS_POLICY, &var_smtp_reqtls_policy, 0, 0,
 	0,
     };
     static const CONFIG_TIME_TABLE lmtp_time_table[] = {
@@ -97,7 +103,9 @@
 	VAR_LMTP_REUSE_COUNT, DEF_LMTP_REUSE_COUNT, &var_smtp_reuse_count, 0, 0,
 #ifdef USE_TLS
 	VAR_LMTP_TLS_SCERT_VD, DEF_LMTP_TLS_SCERT_VD, &var_smtp_tls_scert_vd, 0, 0,
+	VAR_LMTP_TLS_TRACE_SIZE_LIMIT, DEF_LMTP_TLS_TRACE_SIZE_LIMIT, &var_smtp_tls_trace_size_limit, 0, 0,
 #endif
+	VAR_LMTP_MIN_DATA_RATE, DEF_LMTP_MIN_DATA_RATE, &var_smtp_min_data_rate, 1, 0,
 	0,
     };
     static const CONFIG_BOOL_TABLE lmtp_bool_table[] = {
@@ -117,14 +125,27 @@
 	VAR_LMTP_TLS_NOTEOFFER, DEF_LMTP_TLS_NOTEOFFER, &var_smtp_tls_note_starttls_offer,
 	VAR_LMTP_TLS_BLK_EARLY_MAIL_REPLY, DEF_LMTP_TLS_BLK_EARLY_MAIL_REPLY, &var_smtp_tls_blk_early_mail_reply,
 	VAR_LMTP_TLS_FORCE_TLSA, DEF_LMTP_TLS_FORCE_TLSA, &var_smtp_tls_force_tlsa,
+	VAR_LMTP_TLS_ENABLE_RPK, DEF_LMTP_TLS_ENABLE_RPK, &var_smtp_tls_enable_rpk,
 #endif
 	VAR_LMTP_TLS_WRAPPER, DEF_LMTP_TLS_WRAPPER, &var_smtp_tls_wrappermode,
 	VAR_LMTP_SENDER_AUTH, DEF_LMTP_SENDER_AUTH, &var_smtp_sender_auth,
 	VAR_LMTP_CNAME_OVERR, DEF_LMTP_CNAME_OVERR, &var_smtp_cname_overr,
 	VAR_LMTP_SASL_AUTH_SOFT_BOUNCE, DEF_LMTP_SASL_AUTH_SOFT_BOUNCE, &var_smtp_sasl_auth_soft_bounce,
 	VAR_LMTP_ASSUME_FINAL, DEF_LMTP_ASSUME_FINAL, &var_lmtp_assume_final,
-	VAR_LMTP_REC_DEADLINE, DEF_LMTP_REC_DEADLINE, &var_smtp_rec_deadline,
 	VAR_LMTP_DUMMY_MAIL_AUTH, DEF_LMTP_DUMMY_MAIL_AUTH, &var_smtp_dummy_mail_auth,
 	VAR_LMTP_BALANCE_INET_PROTO, DEF_LMTP_BALANCE_INET_PROTO, &var_smtp_balance_inet_proto,
+	VAR_LMTP_BIND_ADDR_ENFORCE, DEF_LMTP_BIND_ADDR_ENFORCE, &var_smtp_bind_addr_enforce,
+	VAR_IGN_SRV_LOOKUP_ERR, DEF_IGN_SRV_LOOKUP_ERR, &var_ign_srv_lookup_err,
+	VAR_ALLOW_SRV_FALLBACK, DEF_ALLOW_SRV_FALLBACK, &var_allow_srv_fallback,
+	0,
+    };
+    static const CONFIG_NBOOL_TABLE lmtp_nbool_table[] = {
+	VAR_LMTP_REQ_DEADLINE, DEF_LMTP_REQ_DEADLINE, &var_smtp_req_deadline,
+	VAR_LMTP_TLSRPT_ENABLE, DEF_LMTP_TLSRPT_ENABLE, &var_smtp_tlsrpt_enable,
+	VAR_LMTP_TLSRPT_SKIP_REUSED_HS, DEF_LMTP_TLSRPT_SKIP_REUSED_HS, &var_smtp_tlsrpt_skip_reused_hs,
+#ifdef USE_TLS
+	VAR_LMTP_TLS_ENF_STS_MX_PAT, DEF_LMTP_TLS_ENF_STS_MX_PAT, &var_smtp_tls_enf_sts_mx_pat,
+	VAR_LMTP_LOG_TLS_FEATURE_STATUS, DEF_LMTP_LOG_TLS_FEATURE_STATUS, &var_log_tls_feature_status,
+#endif
 	0,
     };

@@ -80,6 +80,10 @@ char   *dns_strrecord(VSTRING *buf, DNS_RR *rr)
     case T_MX:
 	vstring_sprintf_append(buf, "%u %s.", rr->pref, rr->data);
 	break;
+    case T_SRV:
+	vstring_sprintf_append(buf, "%u %u %u %s.", rr->pref, rr->weight,
+			       rr->port, rr->data);
+	break;
     case T_TLSA:
 	if (rr->data_len >= 3) {
 	    uint8_t *ip = (uint8_t *) rr->data;
@@ -95,6 +99,8 @@ char   *dns_strrecord(VSTRING *buf, DNS_RR *rr)
 	} else {
 	    vstring_sprintf_append(buf, "[truncated record]");
 	}
+	/* 202605 Missing break found by TristanInSec using ASAN. */
+	break;
 
 	/*
 	 * We use the SOA record TTL to determine the negative reply TTL. We

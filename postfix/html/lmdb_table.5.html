@@ -1,15 +1,16 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 <html> <head>
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 <title> Postfix manual - lmdb_table(5) </title>
 </head> <body> <pre>
 LMDB_TABLE(5)                                                    LMDB_TABLE(5)
 
-<b>NAME</b>
+<b><a name="name">NAME</a></b>
        lmdb_table - Postfix LMDB adapter
 
-<b>SYNOPSIS</b>
+<b><a name="synopsis">SYNOPSIS</a></b>
        <b>postmap <a href="lmdb_table.5.html">lmdb</a>:/etc/postfix/</b><i>filename</i>
        <b>postmap -i <a href="lmdb_table.5.html">lmdb</a>:/etc/postfix/</b><i>filename</i> &lt;<i>inputfile</i>
 
@@ -19,13 +20,13 @@ LMDB_TABLE(5)                                                    LMDB_TABLE(5)
        <b>postmap -q "</b><i>key</i><b>" <a href="lmdb_table.5.html">lmdb</a>:/etc/postfix/</b><i>filename</i>
        <b>postmap -q - <a href="lmdb_table.5.html">lmdb</a>:/etc/postfix/</b><i>filename</i> &lt;<i>inputfile</i>
 
-<b>DESCRIPTION</b>
+<b><a name="description">DESCRIPTION</a></b>
        The  Postfix  LMDB  adapter  provides  access  to  a  persistent,  mem-
        ory-mapped, key-value store.  The database size is limited only by  the
        size  of the memory address space (typically 31 or 47 bits on 32-bit or
        64-bit CPUs, respectively) and by the available file system space.
 
-<b>REQUESTS</b>
+<b><a name="requests">REQUESTS</a></b>
        The LMDB adapter supports all Postfix lookup  table  operations.   This
        makes  LMDB  suitable  for  Postfix  address rewriting, routing, access
        policies, caches, or any information that can be stored under  a  fixed
@@ -40,13 +41,12 @@ LMDB_TABLE(5)                                                    LMDB_TABLE(5)
        part, address extension or domain portion.  This behavior is also found
        with, for example, <a href="DATABASE_README.html#types">btree</a>:, <a href="DATABASE_README.html#types">hash</a>:, or <a href="ldap_table.5.html">ldap</a>: tables.
 
-       Unlike other flat-file Postfix databases, changes to an  LMDB  database
-       do  not  trigger  automatic  daemon program restart, and do not require
-       "<b>postfix reload</b>".
+       Changes to an LMDB database do not trigger an automatic daemon restart,
+       and do not require a daemon restart with "<b>postfix reload</b>".
 
-<b>RELIABILITY</b>
+<b><a name="reliability">RELIABILITY</a></b>
        LMDB's copy-on-write architecture provides safe updates, at the cost of
-       using  more space than some other flat-file databases.  Read operations
+       using more space than some other flat-file databases.  Read  operations
        are memory-mapped for speed.  Write operations are not memory-mapped to
        avoid silent corruption due to stray pointer bugs.
 
@@ -54,44 +54,45 @@ LMDB_TABLE(5)                                                    LMDB_TABLE(5)
        ing requests through the <a href="proxymap.8.html">proxymap(8)</a> service.  This makes LMDB suitable
        as a shared cache for <a href="verify.8.html">verify(8)</a> or <a href="postscreen.8.html">postscreen(8)</a> services.
 
-<b>SYNCHRONIZATION</b>
-       The  Postfix  LMDB adapter does not use LMDB's built-in locking scheme,
-       because that would require world-writable lockfiles and  would  violate
-       the  Postfix security model.  Instead, Postfix uses fcntl(2) locks with
-       whole-file granularity.  Programs that use LMDB's built-in locking pro-
-       tocol will corrupt a Postfix LMDB database or will read garbage.
+<b><a name="synchronization">SYNCHRONIZATION</a></b>
+       The Postfix LMDB adapter does not use LMDB's built-in  locking  scheme,
+       because  that would require world-writable lockfiles and therefore vio-
+       late the Postfix security model.  Instead, Postfix uses fcntl(2)  locks
+       with whole-file granularity.  Programs that use LMDB's built-in locking
+       protocol will corrupt a Postfix LMDB database or will read garbage.
 
        Every Postfix LMDB database read or write transaction must be protected
-       from start to end with a shared or exclusive fcntl(2) lock.   A  writer
-       may  atomically  downgrade  an  exclusive lock to a shared lock, but it
-       must hold an exclusive lock while opening another write transaction.
+       from  start  to end with a shared or exclusive fcntl(2) lock. A process
+       may atomically downgrade an exclusive lock  to  a  shared  lock  before
+       opening a database read transaction, but it must hold an exclusive lock
+       while opening a write transaction.
 
        Note that fcntl(2) locks do not protect transactions  within  the  same
        process  against each other.  If a program cannot avoid making simulta-
        neous database requests, then it must  protect  its  transactions  with
        in-process locks, in addition to the per-process fcntl(2) locks.
 
-<b>CONFIGURATION PARAMETERS</b>
+<b><a name="configuration_parameters">CONFIGURATION PARAMETERS</a></b>
        Short-lived  programs  automatically  pick up changes to <a href="postconf.5.html">main.cf</a>.  With
        long-running daemon programs, Use the command "<b>postfix reload</b>" after  a
        configuration change.
 
-       <b><a href="postconf.5.html#lmdb_map_size">lmdb_map_size</a> (default: 16777216)</b>
-              The initial LMDB database size limit in bytes.
+       <b><a href="postconf.5.html#lmdb_map_size">lmdb_map_size</a> (16777216)</b>
+              The initial OpenLDAP LMDB database size limit in bytes.
 
-<b>SEE ALSO</b>
+<b><a name="see_also">SEE ALSO</a></b>
        <a href="postconf.1.html">postconf(1)</a>, Postfix supported lookup tables
        <a href="postmap.1.html">postmap(1)</a>, Postfix lookup table maintenance
        <a href="postconf.5.html">postconf(5)</a>, configuration parameters
 
-<b>README FILES</b>
+<b><a name="readme_files">README FILES</a></b>
        <a href="DATABASE_README.html">DATABASE_README</a>, Postfix lookup table overview
        <a href="LMDB_README.html">LMDB_README</a>, Postfix OpenLDAP LMDB howto
 
-<b>LICENSE</b>
+<b><a name="license">LICENSE</a></b>
        The Secure Mailer license must be distributed with this software.
 
-<b>HISTORY</b>
+<b><a name="history">HISTORY</a></b>
        LMDB support was introduced with Postfix version 2.11.
 
 <b>AUTHOR(S)</b>

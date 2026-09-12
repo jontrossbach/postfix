@@ -64,7 +64,7 @@
 /*	down-stream servers in the case of a dictionary attack or
 /*	a flood of backscatter bounces.
 /*	Sender address verification may cause your site to be
-/*	blacklisted by some providers.
+/*	denylisted by some providers.
 /*
 /*	If the persistent database ever gets corrupted then the world
 /*	comes to an end and human intervention is needed. This violates
@@ -481,14 +481,20 @@ static void verify_query_service(VSTREAM *client_stream)
 
 	/* FIX 200501 IPv6 patch did not neuter ":" in address literals. */
 	translit(STR(addr), ":", "_");
-	if ((raw_data = dict_cache_lookup(verify_map, STR(addr))) == 0	/* not found */
-	    || ((get_buf = vstring_alloc(10)),
-		vstring_strcpy(get_buf, raw_data),	/* malformed */
-		verify_parse_entry(STR(get_buf), &addr_status, &probed,
-				   &updated, &text) < 0)
-	    || (now - probed > PROBE_TTL	/* safe to probe */
-		&& (POSITIVE_ENTRY_EXPIRED(addr_status, updated)
-		    || NEGATIVE_ENTRY_EXPIRED(addr_status, updated)))) {
+	raw_data = dict_cache_lookup(verify_map, STR(addr));
+	if (dict_cache_error(verify_map) != 0) {
+	    addr_status = DEL_RCPT_STAT_DEFER;
+	    probed = 0;
+	    updated = 0;
+	    text = "Address verification status unavailable";
+	} else if (raw_data == 0		/* not found */
+		   || ((get_buf = vstring_alloc(10)),
+		       vstring_strcpy(get_buf, raw_data),	/* malformed */
+		     verify_parse_entry(STR(get_buf), &addr_status, &probed,
+					&updated, &text) < 0)
+		   || (now - probed > PROBE_TTL	/* safe to probe */
+		       && (POSITIVE_ENTRY_EXPIRED(addr_status, updated)
+			|| NEGATIVE_ENTRY_EXPIRED(addr_status, updated)))) {
 	    addr_status = DEL_RCPT_STAT_TODO;
 	    probed = 0;
 	    updated = 0;
@@ -525,15 +531,16 @@ static void verify_query_service(VSTREAM *client_stream)
 #define NEGATIVE_REFRESH_NEEDED(addr_status, updated) \
     (addr_status != DEL_RCPT_STAT_OK && updated + var_verify_neg_try < now)
 
-	if (now - probed > PROBE_TTL
-	       && (POSITIVE_REFRESH_NEEDED(addr_status, updated)
-		   || NEGATIVE_REFRESH_NEEDED(addr_status, updated))) {
+	if (dict_cache_error(verify_map) == 0 && now - probed > PROBE_TTL
+	    && (POSITIVE_REFRESH_NEEDED(addr_status, updated)
+		|| NEGATIVE_REFRESH_NEEDED(addr_status, updated))) {
 	    if (msg_verbose)
 		msg_info("PROBE %s status=%d probed=%ld updated=%ld",
 			 STR(addr), addr_status, now, updated);
 	    post_mail_fopen_async(make_verify_sender_addr(), STR(addr),
 				  MAIL_SRC_MASK_VERIFY,
 				  DEL_REQ_FLAG_MTA_VRFY,
+	    /* TODO(wietse) disable REQUIRETLS? */
 				  SMTPUTF8_FLAG_NONE,
 				  (VSTRING *) 0,
 				  verify_post_mail_action,
@@ -723,6 +730,21 @@ static void pre_jail_init(char *unused_name, char **unused_argv)
     RESTORE_SAVED_EUGID();
 }
 
+/* post_accept_init - announce our protocol */
+
+static void post_accept_init(VSTREAM *stream, char *unused_name,
+			           char **unused_argv, HTABLE *unused_table)
+{
+
+    /*
+     * Announce the protocol.
+     */
+    attr_print(stream, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_VERIFY),
+	       ATTR_TYPE_END);
+    (void) vstream_fflush(stream);
+}
+
 MAIL_VERSION_STAMP_DECLARE;
 
 /* main - pass control to the multi-threaded skeleton */
@@ -754,6 +776,7 @@ int     main(int argc, char **argv)
 		      CA_MAIL_SERVER_TIME_TABLE(time_table),
 		      CA_MAIL_SERVER_PRE_INIT(pre_jail_init),
 		      CA_MAIL_SERVER_POST_INIT(post_jail_init),
+		      CA_MAIL_SERVER_POST_ACCEPT(post_accept_init),
 		      CA_MAIL_SERVER_SOLITARY,
 		      CA_MAIL_SERVER_EXIT(verify_dump),
 		      0);

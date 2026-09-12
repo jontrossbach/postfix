@@ -140,6 +140,7 @@
 #include <post_mail.h>
 #include <mail_error.h>
 #include <dsn_util.h>
+#include <hfrom_format.h>
 
 /* Application-specific. */
 
@@ -412,7 +413,8 @@ SMTP_RESP *smtp_chat_resp(SMTP_SESSION *session)
     if (three_digs != 0) {
 	rdata.code = atoi(STR(session->buffer));
 	if (strchr("245", STR(session->buffer)[0]) != 0) {
-	    for (cp = STR(session->buffer) + 4; *cp == ' '; cp++)
+	    /* 202606 Qualys+Mythos: start loop immediately after 'ddd'. */
+	    for (cp = STR(session->buffer) + 3; *cp == ' '; cp++)
 		 /* void */ ;
 	    if ((len = dsn_valid(cp)) > 0 && *cp == *STR(session->buffer)) {
 		vstring_strncpy(rdata.dsn_buf, cp, len);
@@ -474,9 +476,15 @@ void    smtp_chat_notify(SMTP_SESSION *session)
 	msg_warn("postmaster notify: %m");
 	return;
     }
-    post_mail_fprintf(notice, "From: %s (Mail Delivery System)",
-		      mail_addr_mail_daemon());
-    post_mail_fprintf(notice, "To: %s (Postmaster)", var_error_rcpt);
+    if (smtp_hfrom_format == HFROM_FORMAT_CODE_STD) {
+	post_mail_fprintf(notice, "From: Mail Delivery System <%s>",
+			  mail_addr_mail_daemon());
+	post_mail_fprintf(notice, "To: Postmaster <%s>", var_error_rcpt);
+    } else {
+	post_mail_fprintf(notice, "From: %s (Mail Delivery System)",
+			  mail_addr_mail_daemon());
+	post_mail_fprintf(notice, "To: %s (Postmaster)", var_error_rcpt);
+    }
     post_mail_fprintf(notice, "Subject: %s %s client: errors from %s",
 		      var_mail_name, smtp_mode ? "SMTP" : "LMTP",
 		      session->namaddrport);

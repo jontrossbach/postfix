@@ -45,98 +45,9 @@
 /*	Must be O_RDONLY.
 /* .IP dict_flags
 /*	See dict_open(3).
-/* .PP
-/*	Configuration parameters:
-/* .IP user
-/*	Username for connecting to the database.
-/* .IP password
-/*	Password for the above.
-/* .IP dbname
-/*	Name of the database.
-/* .IP domain
-/*	List of domains the queries should be restricted to.  If
-/*	specified, only FQDN addresses whose domain parts matching this
-/*	list will be queried against the SQL database.  Lookups for
-/*	partial addresses are also suppressed.  This can significantly
-/*	reduce the query load on the server.
-/* .IP query
-/*	Query template, before the query is actually issued, variable
-/*	substitutions are performed. See mysql_table(5) for details. If
-/*	No query is specified, the legacy variables \fItable\fR,
-/*	\fIselect_field\fR, \fIwhere_field\fR and \fIadditional_conditions\fR
-/*	are used to construct the query template.
-/* .IP result_format
-/*	The format used to expand results from queries.  Substitutions
-/*	are performed as described in mysql_table(5). Defaults to returning
-/*	the lookup result unchanged.
-/* .IP expansion_limit
-/*	Limit (if any) on the total number of lookup result values. Lookups which
-/*	exceed the limit fail with dict->error=DICT_ERR_RETRY. Note that each
-/*	non-empty (and non-NULL) column of a multi-column result row counts as
-/*	one result.
-/* .IP table
-/*	When \fIquery\fR is not set, name of the table used to construct the
-/*	query string. This provides compatibility with older releases.
-/* .IP select_field
-/*	When \fIquery\fR is not set, name of the result field used to
-/*	construct the query string. This provides compatibility with older
-/*	releases.
-/* .IP where_field
-/*	When \fIquery\fR is not set, name of the where clause field used to
-/*	construct the query string. This provides compatibility with older
-/*	releases.
-/* .IP additional_conditions
-/*	When \fIquery\fR is not set, additional where clause conditions used
-/*	to construct the query string. This provides compatibility with older
-/*	releases.
-/* .IP hosts
-/*	List of hosts to connect to.
-/* .IP option_file
-/*	Read options from the given file instead of the default my.cnf
-/*	location.
-/* .IP option_group
-/*	Read options from the given group.
-/* .IP require_result_set
-/*	Require that every query produces a result set.
-/* .IP tls_cert_file
-/*	File containing client's X509 certificate.
-/* .IP tls_key_file
-/*	File containing the private key corresponding to \fItls_cert_file\fR.
-/* .IP tls_CAfile
-/*	File containing certificates for all of the X509 Certification
-/*	Authorities the client will recognize.  Takes precedence over
-/*	\fItls_CApath\fR.
-/* .IP tls_CApath
-/*	Directory containing X509 Certification Authority certificates
-/*	in separate individual files.
-/* .IP tls_verify_cert
-/*	Verify that the server's name matches the common name of the
-/*	certificate.
-/* .PP
-/*	For example, if you want the map to reference databases of
-/*	the name "your_db" and execute a query like this: select
-/*	forw_addr from aliases where alias like '<some username>'
-/*	against any database called "vmailer_info" located on hosts
-/*	host1.some.domain and host2.some.domain, logging in as user
-/*	"vmailer" and password "passwd" then the configuration file
-/*	should read:
-/* .PP
-/*	user = vmailer
-/* .br
-/*	password = passwd
-/* .br
-/*	dbname = vmailer_info
-/* .br
-/*	table = aliases
-/* .br
-/*	select_field = forw_addr
-/* .br
-/*	where_field = alias
-/* .br
-/*	hosts = host1.some.domain host2.some.domain
-/* .PP
 /* SEE ALSO
 /*	dict(3) generic dictionary manager
+/*	mysql_table(5) MySQL client configuration
 /* AUTHOR(S)
 /*	Scott Cotton, Joshua Marcus
 /*	IC Group, Inc.
@@ -172,6 +83,10 @@
 #include <limits.h>
 #include <errno.h>
 
+#if !defined(MYSQL_VERSION_ID) || MYSQL_VERSION_ID < 40000
+#error "MySQL versions <4 are no longer supported"
+#endif
+
 #ifdef STRCASECMP_IN_STRINGS_H
 #include <strings.h>
 #endif
@@ -184,7 +99,7 @@
 #include "argv.h"
 #include "vstring.h"
 #include "split_at.h"
-#include "find_inet.h"
+#include "find_inet_service.h"
 #include "myrand.h"
 #include "events.h"
 #include "stringops.h"
@@ -203,7 +118,17 @@
 #if defined(MARIADB_BASE_VERSION) && MYSQL_VERSION_ID >= 50023
 #define DICT_MYSQL_SSL_VERIFY_SERVER_CERT MYSQL_OPT_SSL_VERIFY_SERVER_CERT
 #elif MYSQL_VERSION_ID >= 80000
-#define DICT_MYSQL_SSL_VERIFY_SERVER_CERT MYSQL_OPT_SSL_MODE
+/* 202607 OpenAI: MYSQL_OPT_SSL_MODE is an enum, not a bool. */
+#define DICT_MYSQL_SSL_MODE MYSQL_OPT_SSL_MODE
+#endif
+
+ /*
+  * MariaDB Connector/C 3.0.0 lists mysql_options() as deprecated and
+  * recommends using mysql_optionsv() instead. Option names and semantics
+  * have not changed.
+  */
+#if defined(MARIADB_PACKAGE_VERSION_ID) && MARIADB_PACKAGE_VERSION_ID >= 30000
+#define mysql_options	mysql_optionsv
 #endif
 
 /* need some structs to help organize things */
@@ -211,7 +136,8 @@ typedef struct {
     MYSQL  *db;
     char   *hostname;
     char   *name;
-    unsigned port;
+    /* 202604 Claude: find_inet_service() returns -1 on error. */
+    int     port;
     unsigned type;			/* TYPEUNIX | TYPEINET */
     unsigned stat;			/* STATUNTRIED | STATFAIL | STATCUR */
     time_t  ts;				/* used for attempting reconnection
@@ -236,18 +162,19 @@ typedef struct {
     char   *username;
     char   *password;
     char   *dbname;
+    char   *charset;
+    int     retry_interval;
+    int     idle_interval;
     ARGV   *hosts;
     PLMYSQL *pldb;
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
     HOST   *active_host;
     char   *tls_cert_file;
     char   *tls_key_file;
     char   *tls_CAfile;
     char   *tls_CApath;
     char   *tls_ciphers;
-#if defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT)
+#if defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT) || defined(DICT_MYSQL_SSL_MODE)
     int     tls_verify_cert;
-#endif
 #endif
     int     require_result_set;
 } DICT_MYSQL;
@@ -260,15 +187,15 @@ typedef struct {
 #define TYPEINET			(1<<1)
 
 #define RETRY_CONN_MAX			100
-#define RETRY_CONN_INTV			60	/* 1 minute */
-#define IDLE_CONN_INTV			60	/* 1 minute */
+#define DEF_RETRY_INTV			60	/* 1 minute */
+#define DEF_IDLE_INTV			60	/* 1 minute */
 
 /* internal function declarations */
 static PLMYSQL *plmysql_init(ARGV *);
 static int plmysql_query(DICT_MYSQL *, const char *, VSTRING *, MYSQL_RES **);
 static void plmysql_dealloc(PLMYSQL *);
 static void plmysql_close_host(HOST *);
-static void plmysql_down_host(HOST *);
+static void plmysql_down_host(HOST *, int);
 static void plmysql_connect_single(DICT_MYSQL *, HOST *);
 static const char *dict_mysql_lookup(DICT *, const char *);
 DICT   *dict_mysql_open(const char *, int, int);
@@ -294,13 +221,21 @@ static void dict_mysql_quote(DICT *dict, const char *name, VSTRING *result)
     buflen = 2 * len + 1;
     VSTRING_SPACE(result, buflen);
 
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
-    if (dict_mysql->active_host)
-	mysql_real_escape_string(dict_mysql->active_host->db,
-				 vstring_end(result), name, len);
-    else
+    if (dict_mysql->active_host == 0)
+	msg_panic("dict_mysql_quote: no active host");
+#if MYSQL_VERSION_ID >= 50706 && !defined(MARIADB_VERSION_ID)
+    mysql_real_escape_string_quote(dict_mysql->active_host->db,
+				   vstring_end(result), name, len, '\'');
+#else
+    if (mysql_real_escape_string(dict_mysql->active_host->db,
+				 vstring_end(result), name, len) ==
+	(unsigned long) -1) {
+	msg_warn("dict_mysql: host (%s) cannot escape input string: >%s<",
+		 dict_mysql->active_host->hostname,
+		 mysql_error(dict_mysql->active_host->db));
+	dict_mysql->active_host->stat = STATFAIL;
+    }
 #endif
-	mysql_escape_string(vstring_end(result), name, len);
 
     VSTRING_SKIP(result);
 }
@@ -320,7 +255,6 @@ static const char *dict_mysql_lookup(DICT *dict, const char *name)
     int     numrows;
     int     expansion;
     const char *r;
-    db_quote_callback_t quote_func = dict_mysql_quote;
     int     domain_rc;
 
     dict->error = 0;
@@ -330,7 +264,7 @@ static const char *dict_mysql_lookup(DICT *dict, const char *name)
      */
 #ifdef SNAPSHOT
     if ((dict->flags & DICT_FLAG_UTF8_ACTIVE) == 0
-	&& !valid_utf8_string(name, strlen(name))) {
+	&& !valid_utf8_stringz(name)) {
 	if (msg_verbose)
 	    msg_info("%s: %s: Skipping lookup of non-UTF-8 key '%s'",
 		     myname, dict_mysql->parser->name, name);
@@ -380,11 +314,8 @@ static const char *dict_mysql_lookup(DICT *dict, const char *name)
      * quoting happens separately for each connection, we don't bother with
      * quoting...
      */
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
-    quote_func = 0;
-#endif
     if (!db_common_expand(dict_mysql->ctx, dict_mysql->query,
-			  name, 0, query, quote_func))
+			  name, 0, query, (db_quote_callback_t) 0))
 	return (0);
 
     /* do the query - set dict->error & cleanup if there's an error */
@@ -528,7 +459,11 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
 {
     HOST   *host;
     MYSQL_RES *first_result = 0;
-    int     query_error;
+
+    /* In case all hosts are down. */
+    int     query_error = 1;
+
+    errno = ENOTSUP;
 
     /*
      * Helper to avoid spamming the log with warnings.
@@ -543,8 +478,6 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
 
     while ((host = dict_mysql_get_active(dict_mysql)) != NULL) {
 
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
-
 	/*
 	 * The active host is used to escape strings in the context of the
 	 * active connection's character encoding.
@@ -554,8 +487,14 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
 	VSTRING_TERMINATE(query);
 	db_common_expand(dict_mysql->ctx, dict_mysql->query,
 			 name, 0, query, dict_mysql_quote);
+	/* Check for potential dict_mysql_quote() failure. */
+	if (host->stat == STATFAIL) {
+	    plmysql_down_host(host, dict_mysql->retry_interval);
+	    continue;
+	}
+	if (msg_verbose)
+	    msg_info("expanded and quoted query: >%s<", vstring_str(query));
 	dict_mysql->active_host = 0;
-#endif
 
 	query_error = 0;
 	errno = 0;
@@ -635,7 +574,7 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
 	 * See what we got.
 	 */
 	if (query_error) {
-	    plmysql_down_host(host);
+	    plmysql_down_host(host, dict_mysql->retry_interval);
 	    if (errno == 0)
 		errno = ENOTSUP;
 	    if (first_result) {
@@ -648,7 +587,7 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
 			 dict_mysql->dict.type, dict_mysql->dict.name,
 			 host->hostname);
 	    event_request_timer(dict_mysql_event, (void *) host,
-				IDLE_CONN_INTV);
+				dict_mysql->idle_interval);
 	    break;
 	}
     }
@@ -664,24 +603,54 @@ static int plmysql_query(DICT_MYSQL *dict_mysql,
  */
 static void plmysql_connect_single(DICT_MYSQL *dict_mysql, HOST *host)
 {
+#if defined(DICT_MYSQL_SSL_MODE)
+    enum mysql_ssl_mode ssl_mode;
+
+#endif
+
     if ((host->db = mysql_init(NULL)) == NULL)
 	msg_fatal("dict_mysql: insufficient memory");
     if (dict_mysql->option_file)
 	mysql_options(host->db, MYSQL_READ_DEFAULT_FILE, dict_mysql->option_file);
     if (dict_mysql->option_group && dict_mysql->option_group[0])
 	mysql_options(host->db, MYSQL_READ_DEFAULT_GROUP, dict_mysql->option_group);
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
+#if MYSQL_VERSION_ID >= 80035
+    /* Preferred API. */
+    if (dict_mysql->tls_key_file)
+	mysql_options(host->db, MYSQL_OPT_SSL_KEY, dict_mysql->tls_key_file);
+    if (dict_mysql->tls_cert_file)
+	mysql_options(host->db, MYSQL_OPT_SSL_CERT, dict_mysql->tls_cert_file);
+    if (dict_mysql->tls_CAfile)
+	mysql_options(host->db, MYSQL_OPT_SSL_CA, dict_mysql->tls_CAfile);
+    if (dict_mysql->tls_CApath)
+	mysql_options(host->db, MYSQL_OPT_SSL_CAPATH, dict_mysql->tls_CApath);
+    if (dict_mysql->tls_ciphers)
+	mysql_options(host->db, MYSQL_OPT_SSL_CIPHER, dict_mysql->tls_ciphers);
+#else
+    /* Deprecated API. */
     if (dict_mysql->tls_key_file || dict_mysql->tls_cert_file ||
 	dict_mysql->tls_CAfile || dict_mysql->tls_CApath || dict_mysql->tls_ciphers)
 	mysql_ssl_set(host->db,
 		      dict_mysql->tls_key_file, dict_mysql->tls_cert_file,
 		      dict_mysql->tls_CAfile, dict_mysql->tls_CApath,
 		      dict_mysql->tls_ciphers);
-#if defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT)
+#endif
+#if defined(DICT_MYSQL_SSL_MODE)
+    if (dict_mysql->tls_verify_cert != -1) {
+	/* MYSQL_OPT_SSL_MODE enum values are not Boolean values. */
+	ssl_mode = dict_mysql->tls_verify_cert ? SSL_MODE_VERIFY_IDENTITY :
+	    SSL_MODE_PREFERRED;
+	if (mysql_options(host->db, DICT_MYSQL_SSL_MODE, &ssl_mode) != 0) {
+	    msg_warn("dict_mysql: could not set TLS mode for host %s: %s",
+		     host->hostname, mysql_error(host->db));
+	    plmysql_down_host(host, dict_mysql->retry_interval);
+	    return;
+	}
+    }
+#elif defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT)
     if (dict_mysql->tls_verify_cert != -1)
 	mysql_options(host->db, DICT_MYSQL_SSL_VERIFY_SERVER_CERT,
 		      &dict_mysql->tls_verify_cert);
-#endif
 #endif
     if (mysql_real_connect(host->db,
 			   (host->type == TYPEINET ? host->name : 0),
@@ -691,6 +660,12 @@ static void plmysql_connect_single(DICT_MYSQL *dict_mysql, HOST *host)
 			   host->port,
 			   (host->type == TYPEUNIX ? host->name : 0),
 			   CLIENT_MULTI_RESULTS)) {
+	if (mysql_set_character_set(host->db, dict_mysql->charset) != 0) {
+	    msg_warn("dict_mysql: mysql_set_character_set '%s' failed: %s",
+		     dict_mysql->charset, mysql_error(host->db));
+	    plmysql_down_host(host, dict_mysql->retry_interval);
+	    return;
+	}
 	if (msg_verbose)
 	    msg_info("dict_mysql: successful connection to host %s",
 		     host->hostname);
@@ -698,7 +673,7 @@ static void plmysql_connect_single(DICT_MYSQL *dict_mysql, HOST *host)
     } else {
 	msg_warn("connect to mysql server %s: %s",
 		 host->hostname, mysql_error(host->db));
-	plmysql_down_host(host);
+	plmysql_down_host(host, dict_mysql->retry_interval);
     }
 }
 
@@ -714,11 +689,11 @@ static void plmysql_close_host(HOST *host)
  * plmysql_down_host - close a failed connection AND set a "stay away from
  * this host" timer
  */
-static void plmysql_down_host(HOST *host)
+static void plmysql_down_host(HOST *host, int retry_interval)
 {
     mysql_close(host->db);
     host->db = 0;
-    host->ts = time((time_t *) 0) + RETRY_CONN_INTV;
+    host->ts = time((time_t *) 0) + retry_interval;
     host->stat = STATFAIL;
     event_cancel_timer(dict_mysql_event, (void *) host);
 }
@@ -735,18 +710,21 @@ static void mysql_parse_config(DICT_MYSQL *dict_mysql, const char *mysqlcf)
     dict_mysql->username = cfg_get_str(p, "user", "", 0, 0);
     dict_mysql->password = cfg_get_str(p, "password", "", 0, 0);
     dict_mysql->dbname = cfg_get_str(p, "dbname", "", 1, 0);
+    dict_mysql->charset = cfg_get_str(p, "charset", "utf8mb4", 1, 0);
+    dict_mysql->retry_interval = cfg_get_int(p, "retry_interval",
+					     DEF_RETRY_INTV, 1, 0);
+    dict_mysql->idle_interval = cfg_get_int(p, "idle_interval",
+					    DEF_IDLE_INTV, 1, 0);
     dict_mysql->result_format = cfg_get_str(p, "result_format", "%s", 1, 0);
     dict_mysql->option_file = cfg_get_str(p, "option_file", NULL, 0, 0);
     dict_mysql->option_group = cfg_get_str(p, "option_group", "client", 0, 0);
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
     dict_mysql->tls_key_file = cfg_get_str(p, "tls_key_file", NULL, 0, 0);
     dict_mysql->tls_cert_file = cfg_get_str(p, "tls_cert_file", NULL, 0, 0);
     dict_mysql->tls_CAfile = cfg_get_str(p, "tls_CAfile", NULL, 0, 0);
     dict_mysql->tls_CApath = cfg_get_str(p, "tls_CApath", NULL, 0, 0);
     dict_mysql->tls_ciphers = cfg_get_str(p, "tls_ciphers", NULL, 0, 0);
-#if defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT)
+#if defined(DICT_MYSQL_SSL_VERIFY_SERVER_CERT) || defined(DICT_MYSQL_SSL_MODE)
     dict_mysql->tls_verify_cert = cfg_get_bool(p, "tls_verify_cert", -1);
-#endif
 #endif
     dict_mysql->require_result_set = cfg_get_bool(p, "require_result_set", 1);
 
@@ -798,6 +776,9 @@ static void mysql_parse_config(DICT_MYSQL *dict_mysql, const char *mysqlcf)
 	    msg_info("%s: %s: no hostnames specified, defaulting to '%s'",
 		     myname, mysqlcf, dict_mysql->hosts->argv[0]);
     }
+    /* Don't blacklist the load balancer! */
+    if (dict_mysql->hosts->argc == 1)
+	argv_add(dict_mysql->hosts, dict_mysql->hosts->argv[0], (char *) 0);
     myfree(hosts);
 }
 
@@ -830,14 +811,12 @@ DICT   *dict_mysql_open(const char *name, int open_flags, int dict_flags)
     dict_mysql->dict.flags = dict_flags;
     dict_mysql->parser = parser;
     mysql_parse_config(dict_mysql, name);
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
     dict_mysql->active_host = 0;
-#endif
     dict_mysql->pldb = plmysql_init(dict_mysql->hosts);
     if (dict_mysql->pldb == NULL)
 	msg_fatal("couldn't initialize pldb!\n");
     dict_mysql->dict.owner = cfg_get_owner(dict_mysql->parser);
-    return (DICT_DEBUG (&dict_mysql->dict));
+    return (&dict_mysql->dict);
 }
 
 /*
@@ -890,7 +869,9 @@ static HOST *host_init(const char *hostname)
     }
     host->name = mystrdup(d);
     if ((s = split_at_right(host->name, ':')) != 0)
-	host->port = ntohs(find_inet_port(s, "tcp"));
+	if ((host->port = find_inet_service(s, "tcp")) < 0)
+	    /* TODO: return null and create a surrogate dictionary. */
+	    msg_fatal("unknown service: %s/tcp", s);
     if (strcasecmp(host->name, "localhost") == 0) {
 	/* The MySQL way: this will actually connect over the UNIX socket */
 	myfree(host->name);
@@ -915,13 +896,13 @@ static void dict_mysql_close(DICT *dict)
     myfree(dict_mysql->username);
     myfree(dict_mysql->password);
     myfree(dict_mysql->dbname);
+    myfree(dict_mysql->charset);
     myfree(dict_mysql->query);
     myfree(dict_mysql->result_format);
     if (dict_mysql->option_file)
 	myfree(dict_mysql->option_file);
     if (dict_mysql->option_group)
 	myfree(dict_mysql->option_group);
-#if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 40000
     if (dict_mysql->tls_key_file)
 	myfree(dict_mysql->tls_key_file);
     if (dict_mysql->tls_cert_file)
@@ -932,7 +913,6 @@ static void dict_mysql_close(DICT *dict)
 	myfree(dict_mysql->tls_CApath);
     if (dict_mysql->tls_ciphers)
 	myfree(dict_mysql->tls_ciphers);
-#endif
     if (dict_mysql->hosts)
 	argv_free(dict_mysql->hosts);
     if (dict_mysql->ctx)

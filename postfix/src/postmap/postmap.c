@@ -5,7 +5,7 @@
 /*	Postfix lookup table management
 /* SYNOPSIS
 /* .fi
-/*	\fBpostmap\fR [\fB-bfFhimnNoprsuUvw\fR] [\fB-c \fIconfig_dir\fR]
+/*	\fBpostmap\fR [\fB-bfFhijmnNoprsuUvw\fR] [\fB-c \fIconfig_dir\fR]
 /*	[\fB-d \fIkey\fR] [\fB-q \fIkey\fR]
 /*		[\fIfile_type\fR:]\fIfile_name\fR ...
 /* DESCRIPTION
@@ -38,7 +38,13 @@
 /* .PP
 /*	The \fIkey\fR and \fIvalue\fR are processed as is, except that
 /*	surrounding white space is stripped off. Whitespace in lookup
-/*	keys is supported as of Postfix 3.2.
+/*	keys is supported in Postfix 3.2 and later, by surrounding the
+/*	key with double quote characters `"'. Within the double quotes,
+/*	double quote `"' and backslash `\\' characters can be included
+/*	by quoting them with a preceding backslash. For backwards
+/*	compatibility, Postfix programs will search with the legacy
+/*	internal form only if the preferred external form is not found,
+/*	and the internal and external forms differ.
 /*
 /*	When the \fB-F\fR option is given, the \fIvalue\fR must
 /*	specify one or more filenames separated by comma and/or
@@ -78,8 +84,8 @@
 /*	headers and for attached message/* headers.
 /* .sp
 /*	NOTE: with "smtputf8_enable = yes", the \fB-b\fR option
-/*	option disables UTF-8 syntax checks on query keys and
-/*	lookup results. Specify the \fB-U\fR option to force UTF-8
+/*	disables UTF-8 syntax checks on query keys and lookup
+/*	results. Specify the \fB-U\fR option to force UTF-8
 /*	syntax checks anyway.
 /* .sp
 /*	This feature is available in Postfix version 2.6 and later.
@@ -105,7 +111,9 @@
 /*	value. When creating a map from source file, process each
 /*	value as a list of filenames, concatenate the content of
 /*	those files, and store the base64-encoded result instead
-/*	of the value (see INPUT FORMAT for details).
+/*	of the value (see INPUT FILE FORMAT for details).
+/* .sp
+/*	This feature is available in Postfix version 3.4 and later.
 /* .IP \fB-h\fR
 /*	Enable message header query mode. When reading lookup keys
 /*	from standard input with "\fB-q -\fR", process the input
@@ -121,7 +129,7 @@
 /*	generates header-style lookup keys for attachment MIME
 /*	headers and for attached message/* headers.
 /* .sp
-/*	NOTE: with "smtputf8_enable = yes", the \fB-b\fR option
+/*	NOTE: with "smtputf8_enable = yes", the \fB-h\fR option
 /*	option disables UTF-8 syntax checks on query keys and
 /*	lookup results. Specify the \fB-U\fR option to force UTF-8
 /*	syntax checks anyway.
@@ -131,6 +139,11 @@
 /*	Incremental mode. Read entries from standard input and do not
 /*	truncate an existing database. By default, \fBpostmap\fR(1) creates
 /*	a new database from the entries in \fBfile_name\fR.
+/* .IP \fB-j\fR
+/*	JSON output. Format the output from \fB-q\fR and \fB-s\fR
+/*	as one \fB{"\fIkey\fB": "\fIvalue\fB"}\fR object per line.
+/* .sp
+/*	This feature is available in Postfix version 3.11 and later.
 /* .IP \fB-m\fR
 /*	Enable MIME parsing with "\fB-b\fR" and "\fB-h\fR".
 /* .sp
@@ -197,6 +210,11 @@
 /*	The database type. To find out what types are supported, use
 /*	the "\fBpostconf -m\fR" command.
 /*
+/*	When no \fIfile_type\fR is specified, the software uses the database
+/*	type specified via the \fBdefault_database_type\fR configuration
+/*	parameter.
+/*	The default value for this parameter depends on the host environment.
+/*
 /*	The \fBpostmap\fR(1) command can query any supported file type,
 /*	but it can create only the following file types:
 /* .RS
@@ -210,21 +228,22 @@
 /*	The output consists of two files, named \fIfile_name\fB.pag\fR and
 /*	\fIfile_name\fB.dir\fR.
 /*	This is available on systems with support for \fBdbm\fR databases.
-/* .IP \fBhash\fR
-/*	The output file is a hashed file, named \fIfile_name\fB.db\fR.
-/*	This is available on systems with support for \fBdb\fR databases.
 /* .IP \fBfail\fR
 /*	A table that reliably fails all requests. The lookup table
 /*	name is used for logging only. This table exists to simplify
 /*	Postfix error tests.
+/* .IP \fBhash\fR
+/*	The output file is a hashed file, named \fIfile_name\fB.db\fR.
+/*	This is available on systems with support for \fBdb\fR databases.
+/* .IP \fBlmdb\fR
+/*	The output is a btree-based file, named \fIfile_name\fB.lmdb\fR.
+/*	\fBlmdb\fR supports concurrent writes and reads from different
+/*	processes, unlike other supported file-based tables.
+/*	This is available on systems with support for \fBlmdb\fR databases.
 /* .IP \fBsdbm\fR
 /*	The output consists of two files, named \fIfile_name\fB.pag\fR and
 /*	\fIfile_name\fB.dir\fR.
 /*	This is available on systems with support for \fBsdbm\fR databases.
-/* .PP
-/*	When no \fIfile_type\fR is specified, the software uses the database
-/*	type specified via the \fBdefault_database_type\fR configuration
-/*	parameter.
 /* .RE
 /* .IP \fIfile_name\fR
 /*	The name of the lookup table source file when rebuilding a database.
@@ -264,17 +283,21 @@
 /*	The default database type for use in \fBnewaliases\fR(1), \fBpostalias\fR(1)
 /*	and \fBpostmap\fR(1) commands.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBsmtputf8_enable (yes)\fR"
 /*	Enable preliminary SMTPUTF8 support for the protocols described
-/*	in RFC 6531..6533.
+/*	in RFC 6531, RFC 6532, and RFC 6533.
 /* .IP "\fBsyslog_facility (mail)\fR"
 /*	The syslog facility of Postfix logging.
 /* .IP "\fBsyslog_name (see 'postconf -d' output)\fR"
 /*	A prefix that is prepended to the process name in syslog
 /*	records, so that, for example, "smtpd" becomes "prefix/smtpd".
+/* .PP
+/*	Available in Postfix 2.11 and later:
+/* .IP "\fBlmdb_map_size (16777216)\fR"
+/*	The initial OpenLDAP LMDB database size limit in bytes.
 /* SEE ALSO
 /*	postalias(1), create/update/query alias database
 /*	postconf(1), supported database types
@@ -329,6 +352,7 @@
 #include <set_eugid.h>
 #include <warn_stat.h>
 #include <clean_env.h>
+#include <dict_db.h>
 
 /* Global library. */
 
@@ -336,7 +360,6 @@
 #include <mail_dict.h>
 #include <mail_params.h>
 #include <mail_version.h>
-#include <mkmap.h>
 #include <mail_task.h>
 #include <dict_proxy.h>
 #include <mime_state.h>
@@ -371,6 +394,13 @@ typedef struct {
     int     header_done;		/* past primary header */
     int     found;			/* result */
 } POSTMAP_KEY_STATE;
+
+ /*
+  * Global state.
+  */
+int     json_output;
+VSTRING *json_key_buf;
+VSTRING *json_val_buf;
 
 /* postmap - create or update mapping database */
 
@@ -415,11 +445,48 @@ static void postmap(char *map_type, char *path_name, int postmap_flags,
     /*
      * If running as root, run as the owner of the source file, so that the
      * result shows proper ownership, and so that a bug in postmap does not
-     * allow privilege escalation.
+     * allow privilege escalation. If the source file is owned by root, but
+     * the parent directory is not, log a warning with suggestions.
      */
-    if ((postmap_flags & POSTMAP_FLAG_AS_OWNER) && getuid() == 0
-	&& (st.st_uid != geteuid() || st.st_gid != getegid()))
-	set_eugid(st.st_uid, st.st_gid);
+    if ((postmap_flags & POSTMAP_FLAG_AS_OWNER) && getuid() == 0) {
+	if (st.st_uid != 0) {
+	    set_eugid(st.st_uid, st.st_gid);
+	} else {
+	    char   *parent_dir;
+	    struct stat parent_st;
+
+	    parent_dir = sane_dirname((VSTRING *) 0, path_name);
+	    if (stat(parent_dir, &parent_st) < 0)
+		msg_fatal("stat %s: %m", parent_dir);
+	    if (parent_st.st_uid != 0) {
+		msg_warn("Creating root-owned database file(s) %s.* "
+			 "in non-root-owned directory %s. Files "
+			 "%s, %s.*, and directory %s should have "
+			 "the same owner. Please fix ownership "
+			 "to avoid a privilege-escalation attack.",
+			 path_name, parent_dir, VSTREAM_PATH(source_fp),
+			 path_name, parent_dir);
+	    }
+	}
+    }
+
+    /*
+     * Override the default per-table cache size for DB map (re)builds. We
+     * can't do this in the mkmap* functions because those don't have access
+     * to Postfix parameter settings.
+     * 
+     * db_cache_size" is defined in util/dict_open.c and defaults to 128kB,
+     * which works well for the lookup code.
+     * 
+     * We use a larger per-table cache when building ".db" files. For "hash"
+     * files performance degrades rapidly unless the memory pool is O(file
+     * size).
+     * 
+     * For "btree" files performance is good with sorted input even for small
+     * memory pools, but with random input degrades rapidly unless the memory
+     * pool is O(file size).
+     */
+    dict_db_cache_size = var_db_create_buf;
 
     /*
      * Open the database, optionally create it when it does not exist,
@@ -439,9 +506,10 @@ static void postmap(char *map_type, char *path_name, int postmap_flags,
      * recoverable error.
      */
     for (;;) {
+	/* 202606 Qualys+Mythos: don't swap 'offset' and 'whence'. */
 	if (dict_isjmp(mkmap->dict) != 0
 	    && dict_setjmp(mkmap->dict) != 0
-	    && vstream_fseek(source_fp, SEEK_SET, 0) < 0)
+	    && vstream_fseek(source_fp, 0, SEEK_SET) < 0)
 	    msg_fatal("seek %s: %m", VSTREAM_PATH(source_fp));
 
 	/*
@@ -457,7 +525,7 @@ static void postmap(char *map_type, char *path_name, int postmap_flags,
 	     */
 	    if ((mkmap->dict->flags & DICT_FLAG_UTF8_ACTIVE)
 		&& !allascii(STR(line_buffer))
-		&& !valid_utf8_string(STR(line_buffer), LEN(line_buffer))) {
+		&& !valid_utf8_stringz(STR(line_buffer))) {
 		msg_warn("%s, line %d: non-UTF-8 input \"%s\""
 			 " -- ignoring this line",
 			 VSTREAM_PATH(source_fp), lineno, STR(line_buffer));
@@ -583,7 +651,13 @@ static void postmap_body(void *ptr, int unused_rec_type,
 		msg_warn("table %s:%s should return NO RESULT in case of NOT FOUND",
 			 dicts[n]->type, dicts[n]->name);
 	    }
-	    vstream_printf("%s	%s\n", keybuf, value);
+	    if (json_output == 0)
+		vstream_printf("%s	%s\n", keybuf, value);
+	    else
+		vstream_printf("{\"%s\": \"%s\"}\n",
+			       quote_for_json(json_key_buf, keybuf, -1),
+			       quote_for_json(json_val_buf, value, -1));
+
 	    state->found = 1;
 	    break;
 	}
@@ -646,8 +720,8 @@ static int postmap_queries(VSTREAM *in, char **maps, const int map_count,
 	dicts[n] = 0;
 
     /*
-     * Perform all queries. Open maps on the fly, to avoid opening unecessary
-     * maps.
+     * Perform all queries. Open maps on the fly, to avoid opening
+     * unnecessary maps.
      */
     if ((postmap_flags & POSTMAP_FLAG_HB_KEY) == 0) {
 	while (vstring_get_nonl(keybuf, in) != VSTREAM_EOF) {
@@ -666,7 +740,12 @@ static int postmap_queries(VSTREAM *in, char **maps, const int map_count,
 			msg_warn("table %s:%s should return NO RESULT in case of NOT FOUND",
 				 dicts[n]->type, dicts[n]->name);
 		    }
-		    vstream_printf("%s	%s\n", STR(keybuf), value);
+		    if (json_output == 0)
+			vstream_printf("%s	%s\n", STR(keybuf), value);
+		    else
+			vstream_printf("{\"%s\": \"%s\"}\n",
+			      quote_for_json(json_key_buf, STR(keybuf), -1),
+				   quote_for_json(json_val_buf, value, -1));
 		    found = 1;
 		    break;
 		}
@@ -762,7 +841,12 @@ static int postmap_query(const char *map_type, const char *map_name,
 	    msg_warn("table %s:%s should return NO RESULT in case of NOT FOUND",
 		     map_type, map_name);
 	}
-	vstream_printf("%s\n", value);
+	if (json_output == 0)
+	    vstream_printf("%s\n", value);
+	else
+	    vstream_printf("{\"%s\": \"%s\"}\n",
+			   quote_for_json(json_key_buf, key, -1),
+			   quote_for_json(json_val_buf, value, -1));
     }
     switch (dict->error) {
     case 0:
@@ -867,8 +951,6 @@ static void postmap_seq(const char *map_type, const char *map_name,
     const char *value;
     int     func;
 
-    if (strcmp(map_type, DICT_TYPE_PROXY) == 0)
-	msg_fatal("can't sequence maps via the proxy service");
     dict = dict_open3(map_type, map_name, O_RDONLY, dict_flags);
     for (func = DICT_SEQ_FUN_FIRST; /* void */ ; func = DICT_SEQ_FUN_NEXT) {
 	if (dict_seq(dict, func, &key, &value) != 0)
@@ -896,7 +978,12 @@ static void postmap_seq(const char *map_type, const char *map_name,
 	    }
 	    value = STR(unb64);
 	}
-	vstream_printf("%s	%s\n", key, value);
+	if (json_output == 0)
+	    vstream_printf("%s	%s\n", key, value);
+	else
+	    vstream_printf("{\"%s\": \"%s\"}\n",
+			   quote_for_json(json_key_buf, key, -1),
+			   quote_for_json(json_val_buf, value, -1));
     }
     if (dict->error)
 	msg_fatal("table %s:%s: sequence error: %m", dict->type, dict->name);
@@ -925,6 +1012,7 @@ int     main(int argc, char **argv)
     int     open_flags = O_RDWR | O_CREAT | O_TRUNC;
     int     dict_flags = (DICT_FLAG_DUP_WARN | DICT_FLAG_FOLD_FIX
 			  | DICT_FLAG_UTF8_REQUEST);
+    int     update = 0;
     char   *query = 0;
     char   *delkey = 0;
     int     sequence = 0;
@@ -967,6 +1055,7 @@ int     main(int argc, char **argv)
 	argv[0] = slash + 1;
     msg_vstream_init(argv[0], VSTREAM_ERR);
     maillog_client_init(mail_task(argv[0]), MAILLOG_CLIENT_FLAG_NONE);
+    set_mail_conf_str(VAR_PROCNAME, var_procname = mystrdup(argv[0]));
 
     /*
      * Check the Postfix library version as soon as we enable logging.
@@ -976,7 +1065,7 @@ int     main(int argc, char **argv)
     /*
      * Parse JCL.
      */
-    while ((ch = GETOPT(argc, argv, "bc:d:fFhimnNopq:rsuUvw")) > 0) {
+    while ((ch = GETOPT(argc, argv, "bc:d:fFhijmnNopq:rsuUvw")) > 0) {
 	switch (ch) {
 	default:
 	    usage(argv[0]);
@@ -993,8 +1082,8 @@ int     main(int argc, char **argv)
 		msg_fatal("out of memory");
 	    break;
 	case 'd':
-	    if (sequence || query || delkey)
-		msg_fatal("specify only one of -s -q or -d");
+	    if (update || sequence || query || delkey)
+		msg_fatal("specify only one of -d -i -q or -s");
 	    delkey = optarg;
 	    break;
 	case 'f':
@@ -1007,7 +1096,17 @@ int     main(int argc, char **argv)
 	    postmap_flags |= POSTMAP_FLAG_HEADER_KEY;
 	    break;
 	case 'i':
+	    if (update || sequence || query || delkey)
+		msg_fatal("specify only one of -d -i -q or -s");
+	    update = 1;
 	    open_flags &= ~O_TRUNC;
+	    break;
+	case 'j':
+	    if (json_output == 0) {
+		json_output = 1;
+		json_key_buf = vstring_alloc(100);
+		json_val_buf = vstring_alloc(100);
+	    }
 	    break;
 	case 'm':
 	    postmap_flags |= POSTMAP_FLAG_MIME_KEY;
@@ -1023,8 +1122,8 @@ int     main(int argc, char **argv)
 	    postmap_flags &= ~POSTMAP_FLAG_SAVE_PERM;
 	    break;
 	case 'q':
-	    if (sequence || query || delkey)
-		msg_fatal("specify only one of -s -q or -d");
+	    if (update || sequence || query || delkey)
+		msg_fatal("specify only one of -d -i -q or -s");
 	    query = optarg;
 	    break;
 	case 'r':
@@ -1032,8 +1131,8 @@ int     main(int argc, char **argv)
 	    dict_flags |= DICT_FLAG_DUP_REPLACE;
 	    break;
 	case 's':
-	    if (query || delkey)
-		msg_fatal("specify only one of -s or -q or -d");
+	    if (update || sequence || query || delkey)
+		msg_fatal("specify only one of -d -i -q or -s");
 	    sequence = 1;
 	    break;
 	case 'u':
@@ -1051,6 +1150,8 @@ int     main(int argc, char **argv)
 	    break;
 	}
     }
+    if (json_output && !(sequence || query))
+	msg_fatal("option -j requires -q or -s");
     mail_conf_read();
     /* Enforce consistent operation of different Postfix parts. */
     import_env = mail_parm_split(VAR_IMPORT_ENVIRON, var_import_environ);

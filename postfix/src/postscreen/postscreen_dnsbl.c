@@ -15,10 +15,12 @@
 /*
 /*	int	psc_dnsbl_retrieve(client_addr, dnsbl_name, dnsbl_index,
 /*					dnsbl_ttl)
-/*	char	*client_addr;
+/*	const char *client_addr;
 /*	const char **dnsbl_name;
 /*	int	dnsbl_index;
 /*	int	*dnsbl_ttl;
+/* AUXILIARY FUNCTIONS
+/*	void	psc_dnsbl_deinit(void)
 /* DESCRIPTION
 /*	This module implements preliminary support for DNSBL lookups.
 /*	Multiple requests for the same information are handled with
@@ -44,6 +46,9 @@
 /*	reference count. The reply TTL value is clamped to
 /*	postscreen_dnsbl_min_ttl and postscreen_dnsbl_max_ttl.  It
 /*	is an error to retrieve a score without requesting it first.
+/*
+/*	psc_dnsbl_deinit() tries to reset state so that psc_dnsbl_init()
+/*	can be called again. This is to support tests only.
 /* LICENSE
 /* .ad
 /* .fi
@@ -115,7 +120,7 @@ static HTABLE *dnsbl_site_cache;	/* indexed by DNSBNL domain */
 static HTABLE_INFO **dnsbl_site_list;	/* flattened cache */
 
 typedef struct {
-    const char *safe_dnsbl;		/* from postscreen_dnsbl_reply_map */
+    char   *safe_dnsbl;			/* from postscreen_dnsbl_reply_map */
     struct PSC_DNSBL_SITE *first;	/* list of (filter, weight) tuples */
 } PSC_DNSBL_HEAD;
 
@@ -150,7 +155,7 @@ typedef struct {
 typedef struct {
     const char *dnsbl_name;		/* DNSBL with largest contribution */
     int     dnsbl_weight;		/* weight of largest contribution */
-    int     total;			/* combined white+blocklist score */
+    int     total;			/* combined allow+denylist score */
     int     fail_ttl;			/* combined reply TTL */
     int     pass_ttl;			/* combined reply TTL */
     int     refcount;			/* score reference count */
@@ -196,11 +201,15 @@ typedef struct {
 	_cb_->context = (ctx); \
     } while (0)
 
+/* 20260606 Qualys+Mythos: read after free, neutralized by memset(0xff). */
+/* 20260607 OpenAI Security: the 20260606 fix introduced a regression. */
 #define PSC_CALL_BACK_NOTIFY(sp, ev) do { \
 	PSC_CALL_BACK_ENTRY *_cb_; \
-	for (_cb_ = (sp)->table; _cb_ < (sp)->table + (sp)->index; _cb_++) \
+	PSC_CALL_BACK_ENTRY *_end_ = (sp)->table + (sp)->index; \
+	int _todo_ = (sp)->refcount; \
+	for (_cb_ = (sp)->table; _todo_ > 0 && _cb_ < _end_; _cb_++) \
 	    if (_cb_->callback != 0) \
-		_cb_->callback((ev), _cb_->context); \
+		{ _cb_->callback((ev), _cb_->context); _todo_ -= 1; } \
     } while (0)
 
 #define PSC_NULL_EVENT	(0)
@@ -231,6 +240,7 @@ static void psc_dnsbl_add_site(const char *site)
     int     weight;
     HTABLE_INFO *ht;
     char   *parse_err;
+    const char *safe_dnsbl;
 
     /*
      * Parse the required DNSBL domain name, the optional reply filter and
@@ -238,7 +248,7 @@ static void psc_dnsbl_add_site(const char *site)
      */
 #define DO_GRIPE	1
 
-    /* Negative weight means whitelist. */
+    /* Negative weight means allowlist. */
     if ((weight_text = split_at(saved_site, '*')) != 0) {
 	if (sscanf(weight_text, "%d%c", &weight, &junk) != 1)
 	    msg_fatal("bad DNSBL weight factor \"%s\" in \"%s\"",
@@ -271,8 +281,9 @@ static void psc_dnsbl_add_site(const char *site)
 	ht = htable_enter(dnsbl_site_cache, saved_site, (void *) head);
 	/* Translate the DNSBL name into a safe name if available. */
 	if (psc_dnsbl_reply == 0
-	 || (head->safe_dnsbl = dict_get(psc_dnsbl_reply, saved_site)) == 0)
-	    head->safe_dnsbl = ht->key;
+	    || (safe_dnsbl = dict_get(psc_dnsbl_reply, saved_site)) == 0)
+	    safe_dnsbl = ht->key;
+	head->safe_dnsbl = mystrdup(safe_dnsbl);
 	if (psc_dnsbl_reply && psc_dnsbl_reply->error)
 	    msg_fatal("%s:%s lookup error", psc_dnsbl_reply->type,
 		      psc_dnsbl_reply->name);
@@ -309,7 +320,8 @@ static int psc_dnsbl_match(const char *filter, ARGV *reply)
 	if (inet_pton(AF_INET, *cpp, addr_buf) != 1)
 	    msg_warn("address conversion error for %s -- ignoring this reply",
 		     *cpp);
-	if (ip_match_execute(filter, addr_buf))
+	/* Qualys+Mythos: skip ip_match_execute() after inet_pton() failure. */
+	else if (ip_match_execute(filter, addr_buf))
 	    return (1);
     }
     return (0);
@@ -478,6 +490,8 @@ static void psc_dnsbl_receive(int event, void *context)
     vstream_fclose(stream);
 }
 
+static int request_count;
+
 /* psc_dnsbl_request  - send dnsbl query, increment reference count */
 
 int     psc_dnsbl_request(const char *client_addr,
@@ -490,7 +504,6 @@ int     psc_dnsbl_request(const char *client_addr,
     HTABLE_INFO **ht;
     PSC_DNSBL_SCORE *score;
     HTABLE_INFO *hash_node;
-    static int request_count;
 
     /*
      * Some spambots make several connections at nearly the same time,
@@ -620,3 +633,72 @@ void    psc_dnsbl_init(void)
     reply_dnsbl = vstring_alloc(100);
     reply_addr = vstring_alloc(100);
 }
+
+ /* Begin code reachable only by tests. */
+
+static void psc_dnsbl_site_free(void *ptr)
+{
+    PSC_DNSBL_SITE *site = (PSC_DNSBL_SITE *) ptr;
+
+    if (site->filter)
+	myfree(site->filter);
+    if (site->byte_codes)
+	myfree(site->byte_codes);
+    if (site->next)
+	psc_dnsbl_site_free(site->next);
+    myfree(site);
+}
+
+static void psc_dnsbl_head_free(void *ptr)
+{
+    PSC_DNSBL_HEAD *head = (PSC_DNSBL_HEAD *) ptr;
+
+    if (head->safe_dnsbl)
+	myfree(head->safe_dnsbl);
+    if (head->first)
+	psc_dnsbl_site_free(head->first);
+    myfree(head);
+};
+
+static void psc_dnsbl_score_free(void *ptr)
+{
+    PSC_DNSBL_SCORE *score = (PSC_DNSBL_SCORE *) ptr;
+
+    myfree(score);
+}
+
+/* psc_dnsbl_deinit - helper for tests only */
+
+void    psc_dnsbl_deinit(void)
+{
+    if (psc_dnsbl_service) {
+	myfree(psc_dnsbl_service);
+	psc_dnsbl_service = 0;
+    }
+    if (dnsbl_site_cache) {
+	htable_free(dnsbl_site_cache, psc_dnsbl_head_free);
+	dnsbl_site_cache = 0;
+    }
+    if (dnsbl_site_list) {
+	myfree(dnsbl_site_list);
+	dnsbl_site_list = 0;
+    }
+    if (dnsbl_score_cache) {
+	htable_free(dnsbl_score_cache, psc_dnsbl_score_free);
+	dnsbl_score_cache = 0;
+    }
+    if (reply_client) {
+	vstring_free(reply_client);
+	reply_client = 0;
+    }
+    if (reply_dnsbl) {
+	vstring_free(reply_dnsbl), reply_dnsbl = 0;
+    }
+    if (reply_addr) {
+	vstring_free(reply_addr);
+	reply_addr = 0;
+    }
+    request_count = 0;
+}
+
+ /* End code reachable only by tests. */

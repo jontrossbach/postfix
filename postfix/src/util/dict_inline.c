@@ -87,7 +87,7 @@ DICT   *dict_inline_open(const char *name, int open_flags, int dict_flags)
      */
     if (DICT_NEED_UTF8_ACTIVATION(util_utf8_enable, dict_flags)
 	&& allascii(name) == 0
-	&& valid_utf8_string(name, strlen(name)) == 0)
+	&& valid_utf8_stringz(name) == 0)
 	DICT_INLINE_RETURN(dict_surrogate(DICT_TYPE_INLINE, name,
 					  open_flags, dict_flags,
 					  "bad UTF-8 syntax: \"%s:%s\"; "
@@ -110,12 +110,12 @@ DICT   *dict_inline_open(const char *name, int open_flags, int dict_flags)
     /*
      * Reuse the "internal" dictionary type.
      */
-    dict = dict_open3(DICT_TYPE_HT, name, open_flags, dict_flags);
+    dict = dict_ht_open(name, open_flags, dict_flags);
     dict_type_override(dict, DICT_TYPE_INLINE);
     while ((nameval = mystrtokq(&cp, CHARS_COMMA_SP, CHARS_BRACE)) != 0) {
-	if ((nameval[0] != CHARS_BRACE[0]
-	     || (err = free_me = extpar(&nameval, CHARS_BRACE, EXTPAR_FLAG_STRIP)) == 0)
-	    && (err = split_qnameval(nameval, &vname, &value)) != 0)
+	if (nameval[0] == CHARS_BRACE[0])
+	    err = free_me = extpar(&nameval, CHARS_BRACE, EXTPAR_FLAG_STRIP);
+	if (err != 0 || (err = split_qnameval(nameval, &vname, &value)) != 0)
 	    break;
 
 	if ((dict->flags & DICT_FLAG_SRC_RHS_IS_FILE) != 0) {
@@ -146,5 +146,5 @@ DICT   *dict_inline_open(const char *name, int open_flags, int dict_flags)
     dict->owner.status = DICT_OWNER_TRUSTED;
 
     dict_file_purge_buffers(dict);
-    DICT_INLINE_RETURN(DICT_DEBUG (dict));
+    DICT_INLINE_RETURN(dict);
 }

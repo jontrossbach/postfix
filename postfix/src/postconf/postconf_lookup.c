@@ -41,7 +41,7 @@
 /*
 /*	Arguments:
 /* .IP buf
-/*	Null buffer pointer, or pointer to user-supplied buffer.
+/*	Pointer to user-supplied buffer; must not be null.
 /* .IP mode
 /*	Bit-wise OR of zero or one of the following (other flags
 /*	are ignored):
@@ -152,24 +152,31 @@ static const char *pcf_lookup_parameter_value_wrapper(const char *key,
 				       (PCF_PARAM_NODE *) 0));
 }
 
+/* pcf_dont_parse_parameter_value - disable recursion for raw parameters */
+
+static bool pcf_dont_parse_parameter_value(const char *key, void *unused_context)
+{
+    PCF_PARAM_NODE *node;
+
+    /* Only built-in parameters can be 'raw'. No need to inspect local_scope. */
+    return ((node = PCF_PARAM_TABLE_FIND(pcf_param_table, key)) != 0
+	    && PCF_RAW_PARAMETER(node));
+}
+
 /* pcf_expand_parameter_value - expand $name in parameter value */
 
 char   *pcf_expand_parameter_value(VSTRING *buf, int mode, const char *value,
 				           PCF_MASTER_ENT *local_scope)
 {
     const char *myname = "pcf_expand_parameter_value";
-    static VSTRING *local_buf;
     int     status;
     PCF_EVAL_CTX eval_ctx;
 
     /*
-     * Initialize.
+     * Sanity check.
      */
-    if (buf == 0) {
-	if (local_buf == 0)
-	    local_buf = vstring_alloc(10);
-	buf = local_buf;
-    }
+    if (buf == 0)
+	msg_panic("%s: null buffer pointer", myname);
 
     /*
      * Expand macros recursively.
@@ -184,8 +191,9 @@ char   *pcf_expand_parameter_value(VSTRING *buf, int mode, const char *value,
 
     eval_ctx.mode = (mode & ~PCF_SHOW_NONDEF);
     eval_ctx.local_scope = local_scope;
-    status = mac_expand(buf, value, MAC_EXP_FLAG_RECURSE, DONT_FILTER,
-		    pcf_lookup_parameter_value_wrapper, (void *) &eval_ctx);
+    status = mac_expand7(buf, value, MAC_EXP_FLAG_RECURSE, DONT_FILTER,
+			 pcf_lookup_parameter_value_wrapper,
+			 pcf_dont_parse_parameter_value, (void *) &eval_ctx);
     if (status & MAC_PARSE_ERROR)
 	msg_fatal("macro processing error");
     if (msg_verbose > 1) {

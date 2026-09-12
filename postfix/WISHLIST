@@ -1,25 +1,345 @@
 Wish list:
 
-	Update makedefs and sys-defs.h for current Linux kernels and
-	*BSD releases.
+	Things to do before the stable release:
 
-	When deleting a recipient with a milter, delete the recipient from
-	the duplicate filter, so that the recipient can be added back.
+	For the stable releases, make the spawn_command fix conditional
+	on compatibility_level.
 
-	DNS wrapper class, like XSASL, to support different stub
-	resolvers without contaminating Postfix programs with the
-	idiosyncracies of stub resolvers. Handle differences in
-	resolver feature sets gracefully: an unsupported request
-	will result in an error status, not program termination.
+	make pre-release-check, HTML validator check.
 
-	DNSSEC end-to-end test, probing a configurable zone (".")
-	and resource type (default: NS).
+	Disable -DSNAPSHOT and -DNONPROD in makedefs.
+
+	Add a mail_version chek to each pluggable database client.
+
+	Unify conf/postfix-wrapper and proto/postfix-wrapper (make
+	one a dependency of the other). They have diverged.
+
+	Should the SMTP client log the queue ID with the TLS status?
+
+	relay_recipient_maps empty should default to 'no valid
+	recipients'. Subject to compatibility level.
+
+	Replace static result buffers with per-instance buffers in
+	dict_unix.c, dict_ni*c.
+
+	The Milter 'quarantine' action should be reported with a
+	call-back function, instead of setting the Milter default
+	reply. However, we still need the existing 'reply' based
+	channel to support "milter_default_action = quarantine".
+
+	In pipe_command() and spawn_command(), the child process
+	should call initgroups() to corrrectly the access rights
+	of interactive shell users.
+
+	relay_recipient_maps empty should default to 'no valid
+	recipients'. Subject to compatibility level.
+
+	In mantools/postlink, allow newline etc. in "<a href".
+
+	Add an option for a TLSRPT built-in JSON generator. This
+	would simplify TLSRPT adoption by eliminating a build-time
+	and run-time dependency on the libtlsrpt client library.
+	Prior art: this approach was previously used to implement
+	Postfix Milter support.
+
+	Make TLSRPT support pluggable (postfix-tlsrpt.so, like
+	postfix-ldap.so, postfix-mysql.so and so on). This avods a
+	hard install-time dependency on sys4 libtlsrpt. The sys4
+	code would still be a required build-time dependency, but
+	it would become an optional install-time dependency.
+
+	Add smtp_tlsrpt_allow_list feature (default: static:all) to limit
+	the domains for which Postfix generates TLSRPT daily summaries.
+
+	Rename TLS_SESS_STATE.rpt_reported to skip_tlsrpt_report.
+
+	Add unit tests for smtp_tlsrpt.c, tlstrpd_wrapper.c, ...
+
+	Add sample master.cf entries for dovecot-lmtp and dovecot-pipe
+	with flags=DORX as appropriate, and single-recipient hints.
+
+	Add unit test for extpar.c
+
+	Add tests for Message-ID extraction in the cleanup daemon.
+
+	When debug logging is enabled, dict_db_open() logs a newline
+	character after the version info.
+
+	postsuper fails to write the maillog file while Postfix is
+	down (the fallback to 'direct write' happens after an
+	irreversible set_ugid() call). Possible solution: figure
+	out if we can open the maillog file before dropping privileges.
+
+	The postdrop code should be more explicit about what
+	attrributes it will pass through. rec_attr_map() is not
+	supposed to be an approver.
+
+	Many master.cf services don't expect wakeup calls, resulting
+	in weird warnings. Maybe the master daemon could signal the
+	wakeup intent through a child process command-line option,
+	so that the child can log "do not enable wakeups". Or the
+	client could announce to the xxx_server-main() skeleton
+	whether it wants wakeups. Or the child process could
+	special-case messages that consist only of a "W". We're not
+	using FIFOs anymore, and trigger servers could use a proper
+	(attribute, value) protocol.
+
+	The Sendmail feature _FFR_MDS_NEGOTIATE allows negotiating
+	a larger milter command data size limit. To be investigated:
+	what parts of the protocol are included in this limit when
+	sending a message header (header name, protocol formatting,
+	etc.) and how this will interact with the Postfix built-in
+	header_size_limit (default: 102400).
+
+	SEND_ATTR_FUNC should send the name of the object being sent,
+	so that SCAN_ATTR_FUNC can check it.
+
+	Send XFORWARD attributes in the SMTPD policy delegation
+	protocol.
+
+	With "smtpd_reject_unlisted_mumble = no" the Postfix SMTP
+	server should still reject recipients that resolve to the
+	error or retry transport.
+
+	bounce/annotate.sh should include the 'QUICK INSTRUCTIONS'
+	into the bounce.cf.default file.
+
+	Should smtp_tls_wrappermode have an SMTP_TLS_POLICY override?
+
+	The postsceen NON-SMTP test should log the command in
+	the same format as the BARE NEWLINE and PREGREET tests.
+	Consider logging the entire unadulterated command line.
+
+	"postconf -d" should not complain about a missing master.cf
+	file.
+
+	qmgr_message.c should do the right thing when the
+	double_bounce_sender value contains @.
+
+	migrate rbl -> dnsbl
+
+	migrate smtpd_sasl_tls_security_options to "noanonymous"
+	(drop the "noplaintext" part).
+
+	Safety: restrict sender-dependent features to, for example,
+	mail from an authorized client (SASL, TLS, or IP address).
+	If this becomes the default then it needs to be subject to
+	comptibility_level.
+
+	Make some of the message editing features available for
+	non-Milter configurations (for example, set envelope.from
+	from primary header.from). 
+
+	The postconf command needs more mongodb tests.
+
+	The mongodb client needs tests.
+
+	Change Postfix SMTP debug logging to display the entire
+	input, instead of stopping at the first null byte.
+
+	SRS-friendly envelope.from output rewrite in the SMTP client.
+	TBD: before or after smtp_generic_maps. The two mechanisms
+	are unlikely to be useful in combination.
+
+	Cleanup: In documentation, replace DBM with LMDB (*.lmdb).
+
+	Cleanup: Is it time to remove SDBM support? Its iterator
+	was unusable, when the SDBM client was adopted in Postfix
+	2.2.
+
+	In documentation and configuration file examples, replace
+	IPv4 address prefixes from Cloud9 with 192.168.* from RFC
+	1918, and replace IPv6 address prefixes with unique local
+	IPv6 address prefixes fd00:* from RFC 4193.
+
+	Add a pre-release check for '.' instead of ','. Generalize
+	from grep '[a-zA-Z0-9]\.  *[a-z]' proto/*|egrep -v
+	'i\.e\.|etc\.|e\.g\.|\.  *[a-zA-Z0-9]*\('
+
+	Update DKIM examples for signing with the benefits of forced
+	MIME converison with "force_mime_input_conversion = yes"
+
+	Scan Postfix code with github.com/googleprojectzero/weggli
+	(depends on "rust").
+
+	Investigate clang-format compatibility as a possible migration
+	away from indent. This requires that the output is stable.
+
+	Check out https://github.com/milter-manager/milter-manager/
+
+	Check out https://github.com/clear-code/cutter
+	(https://cutter.osdn.jp/) for C/C++ unit tests.
+
+	postscreen hints to smtpd to suppress the server greeting
+	after a remote SMTP client has pregreeted. This makes the
+	PIPELINING detection more meaningful.
+
+	Multi-recipient support in sender/recipient_bcc_maps and
+	always_bcc.
+
+	mail_conf_xxx supprt for non-negative numbers (i.e. 
+	numbers with a lower bound of zero).
+
+	Log anvil transgressions with their address range (in
+	addition to the offending IP address. We should not disclose
+	to random clients how we aggregate anvil event counters.
+
+	Should "postconf -f" pretty-print text inside {}?
+
+	Is there any code that calls attr_scan*() and that works
+	when the number of attributes received < the expected number?
+	If there is no such code, then we can simplify a few things.
+
+	Update TLS_README diagram, tlsmgr no longer manages cert
+	info.
+
+	Consider renaming local_header_rewrite_clients to
+	local_header_canonicalize_clients, as a more accurate name.
+	Optionally support "local_header_canonicalize_classes =
+	rewrite_addresses, add_missing_headers" (default setting).
+
+	And ditto for remote_header_rewrite_domain, whether it
+	should rewrite address, add missing headers, or both.
+
+	Add weight factors to randmap, for example randmap:{{result1}*99,
+	{result2}*1}. To parse out weights, see postscreen.
+
+	randmap already allows randmap:{{result}, ...}, to support
+	whitespace and comma in result values, but it should also
+	extract the value from {}.
+
+	Migrate masquerade_domains from ARGV to STRING_LIST, or
+	deprecate this feature because it breaks table-driven address
+	validation.
+
+	Enforce var_line_limit in util/attr_scan*c. This is needed if
+	we want to expose Postfix RPC protocols externally.
+
+	Can tests use LD_PRELOAD to inject fake modules such as
+	fake_dns(3), fake_msg(3), fake_myaddrinfo(3) and so on?
+	One limitation is that functions etc. in a preloaded object
+	always take precedence, even in code that is not being
+	tested.
+
+	'%l' support, similar to %D in the Dovecot LDAP driver.
+	Subject: Feature request: '%l' expansion for ldap_table,
+	Date: Tue, 5 Apr 2022.  Message-ID:
+	<ef7c661c-d86a-2366-6a73-ec8d51d75012@dev.snart.me>
+
+	WARN_IF_REJECT like prefix that disables the error counter increment.
+
+	Consider migrating Postfix server sockets from directory
+	$queue_directory/public to $queue_directory/protected. The
+	directory $queue_directory/public can then be used for
+	non-Postfix listeners (one subdirectory per application).
+
+	FILTER_README needs some text on multi-instance implementations,
+	and existing multi-instance references need to be updated.
+
+	Fix code that still uses "long" for data_size and data_offset,
+	and sscanf("%ld or strtou?l()). This seems relevant for 32-bit
+	systems. This would use a new REC_TYPE_OFFS with a corresponding
+	data type of off_t, using off_cvt() for conversion from string,
+	and new code to convert off_t to string.
+
+	A smart query service for live Postfix tables that outputs JSON?
+	If the idea is to introspect on a running Postfix system, this
+	involves adding an RPC endpoint to specific Postfix services.
+	That could work for single-instance services like qmgr, verify,
+	postscreen.
+
+	JSON logging?
+
+	default_transport_maps? This would simplify configuration.
+
+	Add a pointer to
+	https://fabianlee.org/2019/10/23/docker-running-a-postfix-container-for-testing-mail-during-development/
+	and https://github.com/docker-mailserver/docker-mailserver
+
+	Add a pointer to
+	https://github.com/tarickb/sasl-xoauth2 and/or
+	http://mmogilvi.users.sourceforge.net/software/oauthbearer.html
+	in documentation or on-line howtos.
+
+	Read the above links and see how we can improve usability on
+	the Postfix side.
+
+	Add verp=+= to the qmgr "from=" logging. This is already
+	implemented but not yet integrated.
+
+	Need canonical Dovecot example that has virtual_mailbox_domains,
+	(virtual_mailbox_maps or reject unverified_recipient), and
+	virtual_transport.
+
+	Make smtpd_relay_before_recipient_restrictions settable
+	in smtpd_checks tests.
+
+	Make the DNS resolver library pluggable, so that we can a)
+	plug in a fake resolver library for DNS-related regression
+	tests and make DNS tests hermetic (no external dependency;
+	b) add support for non-libbind resolvers. Gracefully handle
+	requests for unsupported functionality; return an error status,
+	instead of terminating.
+
+	Add a robust dnssec_probe regression test (success and fail)
+	that does not break existing regression tests.
+
+	smtp_sasl_tls_security_options = noanonymous, and make
+	smtp_sasl_security_options the default dependent on the
+	smtp_sasl_tls_security_options default (i.e. reverse the
+	dependency). Or make them independent.
+
+	Try to make the master throttle more distrusting. Currently,
+	the master throttles a service after a child process cannot be
+	created (fork() fails), or if a child process fails upon its
+	first use. The master always unthrottles the service if a process
+	handles a client successfully. This is sufficient to mitigate
+	local errors that break all attempts to use a service. It also
+	slows down stupid remote attacks as long as malicious traffic
+	dominates benign traffic. Perhaps monitor a crashing percentage?
+	If 50% of all connections to a service result in abnormal
+	termination, that would be bad even under a non-attack scenario.
+
+	More accurate address verification: do a quota check before
+	reporting that a local(8) or virtual(8) recipient is deliverable.
+
+	Eliminate duplicate mail submission permission checks from
+	sendmail, so that they happen in postdrop only. Then, pass the
+	result through the postdrop-to-sendmail protocol. This requires
+	that postdrop reads all inputs before responding (the
+	local_login_sender_maps check depends on the envelope
+	sender). Then sendmail can save input to dead.letter (no setgid
+	privilege, but it would still have to use safe_open() to avoid
+	clobbering files).
+
+	Consider removing compat_level_from_numbers() and aliases,
+	because they are no longer used anywhere.
+
+	Allow '}' at the beginning of a line. This would make multi-line
+	configuration settings easier to enter. This may be true
+	for main.cf, master.cf and similar files (such as database
+	configuration files, but not necessarily elsewhere). So it
+	may have to be a readlline flag.
+
+	Understand what happens with DNSSEC related status fields 
+	in posttls-finger when resolv.conf points to a host that
+	runs no DNS server.
+
+	Hardening the half-dane behavior: some sites may rely on
+	current behavior which allows original MX domain name for
+	certificate matches. Requires a new (compatibility) parameter
+	setting?
+
+	Code deduplication: migrate multi_server applications to
+	event_server, because the multi_server and event_server
+	skeletons are much more similar than other skeletons. In
+	addition to the default event_server accept() handler, also
+	register a read event callback for handling post_accept
+	events. But the currrent multi_server API fits typical usage
+	better.
 
 	When a secondary instance has no multi_instance_name set,
-`	postmulti -i won't be able to find it.
-
-	Read http://mmogilvi.users.sourceforge.net/software/oauthbearer.html
-	and see how we can improve on the Postfix side.
+	postmulti -i won't be able to find it.
 
 	nbbio: exercise the sanity checks with fake msg(3) functions.
 
@@ -40,13 +360,6 @@ Wish list:
 
 	Replace ad-hoc code for pipe(8) flags handling, with
 	infrastructure that was built for smtp(8).
-
-	Things to do before the stable release:
-
-	Spell-check, double-word check, HTML validator check,
-	mantools/missing-proxy-read-maps check.
-
-	Disable -DSNAPSHOT and -DNONPROD in makedefs.
 
 	Move map descriptions from postconf(1) to DATABASE_README
 	and point there. The text in DATABASE_README is less complete
@@ -190,10 +503,6 @@ Wish list:
 
 	Maybe don't whitelist a client that has maxed out its
 	per-MTA connection count limit.
-
-	Inline support for pcre:{/pattern/=action, ...} and ditto
-	support for regexp: and cidr: tables. Factor out and reuse
-	code that already exists in inline: and other tables.
 
 	Log command=good/bad statistics in postscreen?
 
@@ -737,22 +1046,6 @@ Wish list:
 	Cleanup: make DNSBL query format configurable beyond the
 	client's reversed IP address.
 
-	With 'final delivery' in the LMTP client, need an option
-	to also add delivered-to and other pipe(8) features.  This
-	requires making mail_copy() functionality available in
-	non-mailbox context.
-
-	Cleanup: modernize the "add missing From: header" code, to
-	``phrase <addr>'' form. Most likely, quote the entire phrase
-	if it contains any text that is special, then rfc822_externalize
-	the whole thing.
-
-	SMTP server: make the server_addr and server_port available
-	to policy server, Dovecot, and perhaps Milters.
-
-	Med: local and remote source port and IP address for smtpd
-	policy hook.
-
 	Maybe change maps_rbl_reject_code default to 521, and
 	update wording in STRESS_README.
 
@@ -764,15 +1057,6 @@ Wish list:
 
 	Plan for time_t larger than long, or wait for LP64 to
 	dominate the world?
-
-	Make "AUTH=<>" appendage to MAIL FROM configurable, enabled
-	by default.
-
-	To support ternary operator without a huge parsing effort,
-	consider ${value?{xxx}:{yyy}} where ${name} is existing
-	syntax, and where ?{text} and :{text} are new syntax that
-	is unlikely to break existing configurations. Or perhaps
-	it's just too ugly.
 
 	Write delivery rate delay example (which _README?) and auth
 	failure cache example (SASL_README). Then include them in

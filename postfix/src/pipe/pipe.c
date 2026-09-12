@@ -171,6 +171,8 @@
 /*	    \fIRight\fR: command -f $sender -- $recipient
 /* .fi
 /* .IP
+/*	NOTE: DO NOT put quotes around the command, $sender, or $recipient.
+/* .IP
 /*	This feature is available as of Postfix 2.3.
 /* .IP "\fBsize\fR=\fIsize_limit\fR (optional)"
 /*	Don't deliver messages that exceed this size limit (in
@@ -190,8 +192,10 @@
 /*	shell meta characters by a shell command interpreter.
 /* .sp
 /*	Specify "{" and "}" around command arguments that contain
-/*	whitespace (Postfix 3.0 and later). Whitespace
-/*	after the opening "{" and before the closing "}" is ignored.
+/*	whitespace, arguments that begin with "{", or arguments
+/*	that must be an empty string (Postfix 3.0 and later). The
+/*	outer "{" and "}" will be removed, together with any leading
+/*	or trailing whitespace in the remaining text.
 /* .sp
 /*	In the command argument vector, the following macros are recognized
 /*	and replaced with corresponding information from the Postfix queue
@@ -229,6 +233,11 @@
 /*	This information is modified by the \fBh\fR flag for case folding.
 /* .sp
 /*	This feature is available as of Postfix 2.5.
+/* .IP \fB${envid}\fR
+/*	This macro expands to the RFC 3461 envelope ID if available,
+/*	otherwise the empty string.
+/* .sp
+/*	This feature is available as of Postfix 3.9.
 /* .IP \fB${extension}\fR
 /*	This macro expands to the extension part of a recipient address.
 /*	For example, with an address \fIuser+foo@domain\fR the extension is
@@ -382,7 +391,7 @@
 /*	request before it is terminated by a built-in watchdog timer.
 /* .IP "\fBdelay_logging_resolution_limit (2)\fR"
 /*	The maximal number of digits after the decimal point when logging
-/*	sub-second delay values.
+/*	delay values.
 /* .IP "\fBexport_environment (see 'postconf -d' output)\fR"
 /*	The list of environment variables that a Postfix process will export
 /*	to non-Postfix processes.
@@ -405,9 +414,8 @@
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
 /*	The location of the Postfix top-level queue directory.
 /* .IP "\fBrecipient_delimiter (empty)\fR"
-/*	The set of characters that can separate a user name from its
-/*	extension (example: user+foo), or a .forward file name from its
-/*	extension (example: .forward+foo).
+/*	The set of characters that can separate an email address
+/*	localpart, user name, or a .forward file name from its extension.
 /* .IP "\fBsyslog_facility (mail)\fR"
 /*	The syslog facility of Postfix logging.
 /* .IP "\fBsyslog_name (see 'postconf -d' output)\fR"
@@ -544,6 +552,7 @@
 #define PIPE_DICT_SASL_USERNAME	"sasl_username"	/* key */
 #define PIPE_DICT_SASL_SENDER	"sasl_sender"	/* key */
 #define PIPE_DICT_QUEUE_ID	"queue_id"	/* key */
+#define PIPE_DICT_ENVID		"envid"	/* key */
 
  /*
   * Flags used to pass back the type of special parameter found by
@@ -649,6 +658,7 @@ static int parse_callback(int type, VSTRING *buf, void *context)
 	PIPE_DICT_SASL_USERNAME, 0,
 	PIPE_DICT_SASL_SENDER, 0,
 	PIPE_DICT_QUEUE_ID, 0,
+	PIPE_DICT_ENVID, 0,
 	0, 0,
     };
     struct cmd_flags *p;
@@ -755,12 +765,6 @@ static ARGV *expand_argv(const char *service, char **argv,
 		 * Either anything to the left of the extension delimiter or,
 		 * in absence of the latter, anything to the left of the
 		 * rightmost @.
-		 * 
-		 * Beware: if the user name is blank (e.g. +user@host), the
-		 * argument is suppressed. This is necessary to allow for
-		 * cyrus bulletin-board (global mailbox) delivery. XXX But,
-		 * skipping empty user parts will also prevent other
-		 * expansions of this specific command-line argument.
 		 */
 		if (state.expand_flag & PIPE_FLAG_USER) {
 		    morph_recipient(buf, rcpt_list->info[i].address,
@@ -770,8 +774,7 @@ static ARGV *expand_argv(const char *service, char **argv,
 				 rcpt_list->info[i].address);
 		    if (*var_rcpt_delim)
 			split_addr(STR(buf), var_rcpt_delim);
-		    if (*STR(buf) == 0)
-			continue;
+		    /* 202607 Qualys+Mythos: don't skip arg if $user is "".*/
 		    dict_update(PIPE_DICT_TABLE, PIPE_DICT_USER, STR(buf));
 		}
 
@@ -1069,7 +1072,7 @@ static int eval_command_status(int command_status, char *service,
 	    rcpt = request->rcpt_list.info + n;
 	    status = sent(DEL_REQ_TRACE_FLAGS(request->flags),
 			  request->queue_id, &request->msg_stats, rcpt,
-			  service, &why->dsn);
+			  service, NO_TLS_STATS, &why->dsn);
 	    if (status == 0 && (request->flags & DEL_REQ_FLAG_SUCCESS))
 		deliver_completed(request->fp, rcpt->offset);
 	    result |= status;
@@ -1086,7 +1089,7 @@ static int eval_command_status(int command_status, char *service,
 		(DEL_REQ_TRACE_FLAGS(request->flags),
 		 request->queue_id,
 		 &request->msg_stats, rcpt,
-		 service, &why->dsn);
+		 service, NO_TLS_STATS, &why->dsn);
 	    if (status == 0)
 		deliver_completed(request->fp, rcpt->offset);
 	    result |= status;
@@ -1198,7 +1201,7 @@ static int deliver_message(DELIVER_REQUEST *request, char *service, char **argv)
 	    rcpt = request->rcpt_list.info + n;
 	    status = sent(DEL_REQ_TRACE_FLAGS(request->flags),
 			  request->queue_id, &request->msg_stats,
-			  rcpt, service, &why->dsn);
+			  rcpt, service, NO_TLS_STATS, &why->dsn);
 	    if (status == 0 && (request->flags & DEL_REQ_FLAG_SUCCESS))
 		deliver_completed(request->fp, rcpt->offset);
 	    deliver_status |= status;
@@ -1278,6 +1281,8 @@ static int deliver_message(DELIVER_REQUEST *request, char *service, char **argv)
 		request->sasl_sender);
     dict_update(PIPE_DICT_TABLE, PIPE_DICT_QUEUE_ID,
 		request->queue_id);
+    dict_update(PIPE_DICT_TABLE, PIPE_DICT_ENVID,
+		request->dsn_envid);
     vstring_free(buf);
 
     if ((expanded_argv = expand_argv(service, attr.command,

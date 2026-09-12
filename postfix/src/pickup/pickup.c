@@ -247,7 +247,8 @@ static int copy_segment(VSTREAM *qfile, VSTREAM *cleanup, PICKUP_INFO *info,
      * We must allow PTR records here because of "postsuper -r".
      */
     for (;;) {
-	if ((type = rec_get(qfile, buf, var_line_limit)) < 0
+	/* 202606 Qualys+Mythos: don't allow type-0 records. */
+	if ((type = rec_get(qfile, buf, var_line_limit)) <= 0
 	    || strchr(expected, type) == 0)
 	    return (file_read_error(info, type));
 	if (msg_verbose)
@@ -334,12 +335,13 @@ static int pickup_copy(VSTREAM *qfile, VSTREAM *cleanup,
 #define HOUR_SECONDS 3600
 
     if (info->st.st_mtime > now + 2 * HOUR_SECONDS) {
-	msg_warn("%s: message dated %ld seconds into the future",
-		 info->id, (long) (info->st.st_mtime - now));
+	msg_warn("%s: message %s dated %ld seconds into the future",
+		 info->id, info->path, (long) (info->st.st_mtime - now));
 	info->st.st_mtime = now;
     } else if (info->st.st_mtime < now - DAY_SECONDS) {
-	msg_warn("%s: message has been queued for %d days",
-		 info->id, (int) ((now - info->st.st_mtime) / DAY_SECONDS));
+	msg_warn("%s: message %s has been queued for %d days",
+		 info->id, info->path,
+		 (int) ((now - info->st.st_mtime) / DAY_SECONDS));
     }
 
     /*
@@ -485,9 +487,11 @@ static int pickup_file(PICKUP_INFO *info)
 	cleanup_flags &= ~CLEANUP_FLAG_MILTER;
     else
 	cleanup_flags |= smtputf8_autodetect(MAIL_SRC_MASK_SENDMAIL);
+    /* TODO(wietse) REQUIRETLS? */
 
     cleanup = mail_connect_wait(MAIL_CLASS_PUBLIC, var_cleanup_service);
     if (attr_scan(cleanup, ATTR_FLAG_STRICT,
+		  RECV_ATTR_STREQ(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_CLEANUP),
 		  RECV_ATTR_STR(MAIL_ATTR_QUEUEID, buf),
 		  ATTR_TYPE_END) != 1
 	|| attr_print(cleanup, ATTR_FLAG_NONE,

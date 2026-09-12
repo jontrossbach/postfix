@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix Built-in Content Inspection</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -287,7 +288,7 @@ is queued, as described in the FILTER_README document. </p>
 <h2><a name="daily">Preventing daily mail status reports from being blocked </a></h2>
 
 <p>The following is quoted from Jim Seymour's Pflogsumm FAQ at
-http://jimsun.linxnet.com/downloads/pflogsumm-faq.txt. Pflogsumm
+https://jimsun.linxnet.com/downloads/pflogsumm-faq.txt. Pflogsumm
 is a program that analyzes Postfix logs, including the logging from
 rejected mail. If these logs contain text that was rejected by
 Postfix body_checks patterns, then the logging is also likely to
@@ -376,7 +377,7 @@ service with header/body filtering turned off.  </p>
         -o receive_override_options=no_header_body_checks
     127.0.0.1:smtp inet  n       -       n       -       -       smtpd
         -o receive_override_options=no_header_body_checks
-    pickup         fifo  n       -       n       60      1       pickup
+    pickup         unix  n       -       n       60      1       pickup
         -o receive_override_options=no_header_body_checks
 </pre>
 
@@ -458,8 +459,8 @@ of duplication. </p>
 Postfix versions do not support the receive_override_options feature.
 </p>
 
-<p> If you are MX service provider and want to apply disable
-head/body checks for some domains, you can configure ONE Postfix
+<p> If you are an MX service provider and want to enable header/body
+checks only for some domains, you can configure ONE Postfix
 instance with multiple SMTP server IP addresses in master.cf. Each
 address provides a different service. </p>
 

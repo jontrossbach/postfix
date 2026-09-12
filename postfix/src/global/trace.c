@@ -6,12 +6,13 @@
 /* SYNOPSIS
 /*	#include <trace.h>
 /*
-/*	int	trace_append(flags, id, stats, rcpt, relay, dsn)
+/*	int	trace_append(flags, id, stats, rcpt, relay, tstats, dsn)
 /*	int	flags;
 /*	const char *id;
 /*	MSG_STATS *stats;
 /*	RECIPIENT *rcpt;
 /*	const char *relay;
+/*	const POL_STATS *tstats;
 /*	DSN	*dsn;
 /*
 /*	int     trace_flush(flags, queue, id, encoding, sender,
@@ -61,6 +62,8 @@
 /*	Recipient information. See recipient_list(3).
 /* .IP relay
 /*	The host we sent the mail to.
+/* .IP tstats
+/*	TLS per-feature status.
 /* .IP dsn
 /*	Delivery status information. See dsn(3).
 /* DIAGNOSTICS
@@ -79,6 +82,14 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -105,7 +116,7 @@
 
 int     trace_append(int flags, const char *id, MSG_STATS *stats,
 		             RECIPIENT *rcpt, const char *relay,
-		             DSN *dsn)
+		             const POL_STATS *tstats, DSN *dsn)
 {
     VSTRING *why = vstring_alloc(100);
     DSN     my_dsn = *dsn;
@@ -121,17 +132,18 @@ int     trace_append(int flags, const char *id, MSG_STATS *stats,
     my_dsn.reason = vstring_str(why);
 
     if (mail_command_client(MAIL_CLASS_PRIVATE, var_trace_service,
+			    MAIL_ATTR_PROTO_BOUNCE,
 			    SEND_ATTR_INT(MAIL_ATTR_NREQ, BOUNCE_CMD_APPEND),
 			    SEND_ATTR_INT(MAIL_ATTR_FLAGS, flags),
 			    SEND_ATTR_STR(MAIL_ATTR_QUEUEID, id),
-			    SEND_ATTR_FUNC(rcpt_print, (void *) rcpt),
-			    SEND_ATTR_FUNC(dsn_print, (void *) &my_dsn),
+			    SEND_ATTR_FUNC(rcpt_print, (const void *) rcpt),
+			  SEND_ATTR_FUNC(dsn_print, (const void *) &my_dsn),
 			    ATTR_TYPE_END) != 0) {
 	msg_warn("%s: %s service failure", id, var_trace_service);
 	req_stat = -1;
     } else {
 	if (flags & DEL_REQ_FLAG_USR_VRFY)
-	    log_adhoc(id, stats, rcpt, relay, dsn, my_dsn.action);
+	    log_adhoc(id, stats, rcpt, relay, tstats, dsn, my_dsn.action);
 	req_stat = 0;
     }
     vstring_free(why);
@@ -145,6 +157,7 @@ int     trace_flush(int flags, const char *queue, const char *id,
 		            const char *dsn_envid, int dsn_ret)
 {
     if (mail_command_client(MAIL_CLASS_PRIVATE, var_trace_service,
+			    MAIL_ATTR_PROTO_BOUNCE,
 			    SEND_ATTR_INT(MAIL_ATTR_NREQ, BOUNCE_CMD_TRACE),
 			    SEND_ATTR_INT(MAIL_ATTR_FLAGS, flags),
 			    SEND_ATTR_STR(MAIL_ATTR_QUEUE, queue),

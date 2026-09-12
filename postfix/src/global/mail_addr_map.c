@@ -166,10 +166,6 @@ ARGV   *mail_addr_map_opt(MAPS *path, const char *address, int propagate,
 	 */
 	argv = mail_addr_crunch_opt(string, propagate ? extension : 0,
 				    MA_FORM_EXTERNAL, out_form);
-	if (buffer)
-	    vstring_free(buffer);
-	if (ext_address)
-	    vstring_free(ext_address);
 	if (msg_verbose)
 	    for (i = 0; i < argv->argc; i++)
 		msg_info("%s: %s -> %d: %s", myname, address, i, argv->argv[i]);
@@ -179,6 +175,12 @@ ARGV   *mail_addr_map_opt(MAPS *path, const char *address, int propagate,
 	    argv = argv_free(argv);
 	    path->error = DICT_ERR_RETRY;
 	}
+
+	/* 202606 Qualys+Mythos: future proofing: destroy objects last. */
+	if (buffer)
+	    vstring_free(buffer);
+	if (ext_address)
+	    vstring_free(ext_address);
     }
 
     /*
@@ -359,12 +361,12 @@ static MAIL_ADDR_MAP_TEST pass_tests[] = {
 	{"\"a@a\"@example.net"}, 1,
     },
     {
-        "12 external -external-> external, extension, propagation",
-        "inline:{ aa@example.com=bb@example.com }",
-        DO_PROPAGATE_UNMATCHED_EXTENSION, DOT_RECIPIENT_DELIMITER,
-        MA_FORM_EXTERNAL, MA_FORM_EXTERNAL, MA_FORM_EXTERNAL,
-        "aa.ext@example.com",
-        {"bb.ext@example.com"}, 1,
+	"12 external -external-> external, extension, propagation",
+	"inline:{ aa@example.com=bb@example.com }",
+	DO_PROPAGATE_UNMATCHED_EXTENSION, DOT_RECIPIENT_DELIMITER,
+	MA_FORM_EXTERNAL, MA_FORM_EXTERNAL, MA_FORM_EXTERNAL,
+	"aa.ext@example.com",
+	{"bb.ext@example.com"}, 1,
     },
     0,
 };

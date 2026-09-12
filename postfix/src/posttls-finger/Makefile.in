@@ -36,19 +36,8 @@ update: ../../bin/posttls-finger
 ../../bin/posttls-finger: posttls-finger
 	cp $? $@
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-lint:
-	lint $(DEFS) $(SRCS) $(LINTFIX)
-
 clean:
 	rm -f *.o *core $(PROG) $(TESTPROG) junk
-	rm -rf printfck
 
 tidy:	clean
 
@@ -74,6 +63,7 @@ posttls-finger.o: ../../include/host_port.h
 posttls-finger.o: ../../include/htable.h
 posttls-finger.o: ../../include/inet_proto.h
 posttls-finger.o: ../../include/iostuff.h
+posttls-finger.o: ../../include/known_tcp_ports.h
 posttls-finger.o: ../../include/mail_conf.h
 posttls-finger.o: ../../include/mail_params.h
 posttls-finger.o: ../../include/mail_parm_split.h

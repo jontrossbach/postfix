@@ -39,20 +39,8 @@ update: ../../libexec/o$(PROG)
 ../../libexec/o$(PROG): $(PROG)
 	cp $(PROG) ../../libexec/o$(PROG)
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	cp *.h printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-lint:
-	lint $(DEFS) $(SRCS) $(LINTFIX)
-
 clean:
 	rm -f *.o *core $(PROG) $(TESTPROG) junk 
-	rm -rf printfck
 
 tidy:	clean
 
@@ -114,6 +102,7 @@ qmgr_active.o: ../../include/msg.h
 qmgr_active.o: ../../include/msg_stats.h
 qmgr_active.o: ../../include/mymalloc.h
 qmgr_active.o: ../../include/nvtable.h
+qmgr_active.o: ../../include/pol_stats.h
 qmgr_active.o: ../../include/qmgr_user.h
 qmgr_active.o: ../../include/rec_type.h
 qmgr_active.o: ../../include/recipient_list.h
@@ -137,6 +126,7 @@ qmgr_bounce.o: ../../include/htable.h
 qmgr_bounce.o: ../../include/msg_stats.h
 qmgr_bounce.o: ../../include/mymalloc.h
 qmgr_bounce.o: ../../include/nvtable.h
+qmgr_bounce.o: ../../include/pol_stats.h
 qmgr_bounce.o: ../../include/recipient_list.h
 qmgr_bounce.o: ../../include/scan_dir.h
 qmgr_bounce.o: ../../include/sys_defs.h
@@ -159,6 +149,7 @@ qmgr_defer.o: ../../include/msg.h
 qmgr_defer.o: ../../include/msg_stats.h
 qmgr_defer.o: ../../include/mymalloc.h
 qmgr_defer.o: ../../include/nvtable.h
+qmgr_defer.o: ../../include/pol_stats.h
 qmgr_defer.o: ../../include/recipient_list.h
 qmgr_defer.o: ../../include/scan_dir.h
 qmgr_defer.o: ../../include/sys_defs.h
@@ -187,6 +178,7 @@ qmgr_deliver.o: ../../include/nvtable.h
 qmgr_deliver.o: ../../include/rcpt_print.h
 qmgr_deliver.o: ../../include/recipient_list.h
 qmgr_deliver.o: ../../include/scan_dir.h
+qmgr_deliver.o: ../../include/sendopts.h
 qmgr_deliver.o: ../../include/smtputf8.h
 qmgr_deliver.o: ../../include/stringops.h
 qmgr_deliver.o: ../../include/sys_defs.h
@@ -276,6 +268,7 @@ qmgr_message.o: ../../include/myflock.h
 qmgr_message.o: ../../include/mymalloc.h
 qmgr_message.o: ../../include/nvtable.h
 qmgr_message.o: ../../include/opened.h
+qmgr_message.o: ../../include/pol_stats.h
 qmgr_message.o: ../../include/qmgr_user.h
 qmgr_message.o: ../../include/rec_attr_map.h
 qmgr_message.o: ../../include/rec_type.h
@@ -284,6 +277,7 @@ qmgr_message.o: ../../include/record.h
 qmgr_message.o: ../../include/resolve_clnt.h
 qmgr_message.o: ../../include/rewrite_clnt.h
 qmgr_message.o: ../../include/scan_dir.h
+qmgr_message.o: ../../include/sendopts.h
 qmgr_message.o: ../../include/sent.h
 qmgr_message.o: ../../include/split_addr.h
 qmgr_message.o: ../../include/split_at.h

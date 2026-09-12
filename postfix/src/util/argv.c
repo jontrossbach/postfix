@@ -6,11 +6,18 @@
 /* SYNOPSIS
 /*	#include <argv.h>
 /*
+/*	typedef	int (*ARGV_COMPAR_FN)(const void *, const void *);
+/*
 /*	ARGV	*argv_alloc(len)
 /*	ssize_t	len;
 /*
-/*	ARGV    *argv_sort(argvp)
+/*	ARGV    *argv_qsort(argvp, compar)
 /*	ARGV    *argvp;
+/*	ARGV_COMPAR_FN compar;
+/*
+/*	void	argv_uniq(argvp, compar)
+/*	ARGV	*argvp;
+/*	ARGV_COMPAR_FN compar;
 /*
 /*	ARGV	*argv_free(argvp)
 /*	ARGV	*argvp;
@@ -23,6 +30,10 @@
 /*	ARGV	*argvp;
 /*	char	*arg;
 /*	ssize_t	arg_len;
+/*
+/*	ARGV	*argv_addv(argvp, argv)
+/*	ARGV	*argvp;
+/*	const char **argv;
 /*
 /*	void	argv_terminate(argvp);
 /*	ARGV	*argvp;
@@ -46,8 +57,17 @@
 /*	ssize_t	pos;
 /*	ssize_t	how_many;
 /*
+/*	char	*argv_join(buf, argvp, delim)
+/*	VSTRING	*buf;
+/*	ARGV	*argvp;
+/*	int	delim;
+/*
 /*	void	ARGV_FAKE_BEGIN(argv, arg)
 /*	const char *arg;
+/*
+/*	void	ARGV_FAKE2_BEGIN(argv, arg1, arg2)
+/*	const char *arg1;
+/*	const char *arg2;
 /*
 /*	void	ARGV_FAKE_END
 /* DESCRIPTION
@@ -64,8 +84,15 @@
 /*	length. The result is ready for use by argv_add(). The array
 /*	is null terminated.
 /*
-/*	argv_sort() sorts the elements of argvp in place returning
-/*	the original array.
+/*	argv_qsort() sorts the elements of argvp in place, and
+/*	returns its first argument. If the compar argument specifies
+/*	a null pointer, then argv_qsort() will use byte-by-byte
+/*	comparison.
+/*
+/*	argv_uniq() reduces adjacent same-value elements to one
+/*	element, and returns its first argument. If the compar
+/*	argument specifies a null pointer, then argv_uniq() will
+/*	use byte-by-byte comparison.
 /*
 /*	argv_add() copies zero or more strings and adds them to the
 /*	specified string array. The array is null terminated.
@@ -75,12 +102,16 @@
 /*	argv_addn() is like argv_add(), but each string is followed
 /*	by a string length argument.
 /*
+/*	argv_addv() optionally creates an ARGV when the first argument
+/*	is a null pointer, and appends a null-terminated list of
+/*	strings. The result is null terminated.
+/*
 /*	argv_free() releases storage for a string array, and conveniently
 /*	returns a null pointer.
 /*
 /*	argv_terminate() null-terminates its string array argument.
 /*
-/*	argv_truncate() trucates its argument to the specified
+/*	argv_truncate() truncates its argument to the specified
 /*	number of entries, but does not reallocate memory. The
 /*	result is null-terminated.
 /*
@@ -95,6 +126,10 @@
 /*	starting at the specified array position. The result is
 /*	null-terminated.
 /*
+/*	argv_join() joins all elements in an array using the
+/*	specified delimiter value, and appends the result to the
+/*	specified buffer.
+/*
 /*	ARGV_FAKE_BEGIN/END are an optimization for the case where
 /*	a single string needs to be passed into an ARGV-based
 /*	interface.  ARGV_FAKE_BEGIN() opens a statement block and
@@ -103,6 +138,9 @@
 /*	implementation allocates no heap memory and creates no copy
 /*	of the second argument.  ARGV_FAKE_END closes the statement
 /*	block and thereby releases storage.
+/*
+/*	ARGV_FAKE2_BEGIN/END provide the same functionality for a pair
+/*	of strings.
 /* SEE ALSO
 /*	msg(3) diagnostics interface
 /* DIAGNOSTICS
@@ -116,6 +154,14 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System libraries. */
@@ -129,6 +175,7 @@
 
 #include "mymalloc.h"
 #include "msg.h"
+#include "vstring.h"
 #include "argv.h"
 
 /* argv_free - destroy string array */
@@ -157,6 +204,9 @@ ARGV   *argv_alloc(ssize_t len)
     argvp = (ARGV *) mymalloc(sizeof(*argvp));
     argvp->len = 0;
     sane_len = (len < 2 ? 2 : len);
+    /* Peace, scanner. */
+    if (sane_len > SSIZE_MAX - 1)
+	msg_panic("argv_alloc: array length overflow");
     argvp->argv = (char **) mymalloc((sane_len + 1) * sizeof(char *));
     argvp->len = sane_len;
     argvp->argc = 0;
@@ -172,11 +222,40 @@ static int argv_cmp(const void *e1, const void *e2)
     return strcmp(s1, s2);
 }
 
-/* argv_sort - sort array in place */
+/* argv_qsort - sort array in place */
+
+ARGV   *argv_qsort(ARGV *argvp, ARGV_COMPAR_FN compar)
+{
+    qsort(argvp->argv, argvp->argc, sizeof(argvp->argv[0]),
+	  compar ? compar : argv_cmp);
+    return (argvp);
+}
+
+/* argv_sort - binary compatibility */
 
 ARGV   *argv_sort(ARGV *argvp)
 {
     qsort(argvp->argv, argvp->argc, sizeof(argvp->argv[0]), argv_cmp);
+    return (argvp);
+}
+
+/* argv_uniq - deduplicate adjacent array elements */
+
+ARGV   *argv_uniq(ARGV *argvp, ARGV_COMPAR_FN compar)
+{
+    char  **cpp;
+    char  **prev;
+
+    if (compar == 0)
+	compar = argv_cmp;
+    for (prev = 0, cpp = argvp->argv; cpp < argvp->argv + argvp->argc; cpp++) {
+	if (prev != 0 && compar(prev, cpp) == 0) {
+	    argv_delete(argvp, cpp - argvp->argv, 1);
+	    cpp = prev;
+	} else {
+	    prev = cpp;
+	}
+    }
     return (argvp);
 }
 
@@ -186,6 +265,9 @@ static void argv_extend(ARGV *argvp)
 {
     ssize_t new_len;
 
+    /* 202604 Claude: avoid overflowing (new_len + 1) * sizeof(char *).  */
+    if (argvp->len > SSIZE_MAX / (2 * sizeof(char *)) - 1)
+	msg_panic("argv_extend: array length overflow");
     new_len = argvp->len * 2;
     argvp->argv = (char **)
 	myrealloc((void *) argvp->argv, (new_len + 1) * sizeof(char *));
@@ -214,6 +296,8 @@ void    argv_add(ARGV *argvp,...)
     argvp->argv[argvp->argc] = 0;
 }
 
+#if 0
+
 /* argv_addn - add string to vector */
 
 void    argv_addn(ARGV *argvp,...)
@@ -235,6 +319,25 @@ void    argv_addn(ARGV *argvp,...)
     }
     va_end(ap);
     argvp->argv[argvp->argc] = 0;
+}
+
+#endif
+
+/* argv_addv - optionally create ARGV, append string vector */
+
+ARGV   *argv_addv(ARGV *argvp, const char *const * argv)
+{
+    const char *const * cpp;
+
+    if (argvp == 0) {
+	for (cpp = argv; *cpp; cpp++)
+	     /* void */ ;
+	argvp = argv_alloc(cpp - argv);
+    }
+    for (cpp = argv; *cpp; cpp++)
+	argv_add(argvp, *cpp, (char *) 0);
+    argvp->argv[argvp->argc] = 0;
+    return (argvp);
 }
 
 /* argv_terminate - terminate string array */
@@ -312,9 +415,10 @@ void    argv_delete(ARGV *argvp, ssize_t first, ssize_t how_many)
     ssize_t pos;
 
     /*
-     * Sanity check.
+     * Sanity check. 202604 Claude: avoid expression 'first + how_many'.
      */
-    if (first < 0 || how_many < 0 || first + how_many > argvp->argc)
+    if (first < 0 || how_many < 0 || first > argvp->argc
+	|| how_many > argvp->argc - first)
 	msg_panic("argv_delete bad range: (start=%ld count=%ld)",
 		  (long) first, (long) how_many);
 
@@ -323,4 +427,18 @@ void    argv_delete(ARGV *argvp, ssize_t first, ssize_t how_many)
     for (pos = first; pos <= argvp->argc - how_many; pos++)
 	argvp->argv[pos] = argvp->argv[pos + how_many];
     argvp->argc -= how_many;
+}
+
+/* argv_join - concatenate array elements with delimiter */
+
+char   *argv_join(VSTRING *buf, ARGV *argv, int delim)
+{
+    char  **cpp;
+
+    for (cpp = argv->argv; *cpp; cpp++) {
+	vstring_strcat(buf, *cpp);
+	if (cpp[1])
+	    VSTRING_ADDCH(buf, delim);
+    }
+    return (vstring_str(buf));
 }

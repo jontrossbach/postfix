@@ -77,8 +77,10 @@ int     main(int argc, char **argv)
     int     ch;
     int     lflags = DNS_REQ_FLAG_NONE;
 
+    var_dnssec_probe = "";
+
     msg_vstream_init(argv[0], VSTREAM_ERR);
-    while ((ch = GETOPT(argc, argv, "f:npv")) > 0) {
+    while ((ch = GETOPT(argc, argv, "f:l:npvs")) > 0) {
 	switch (ch) {
 	case 'v':
 	    msg_verbose++;
@@ -86,11 +88,17 @@ int     main(int argc, char **argv)
 	case 'f':
 	    dns_rr_filter_compile("DNS reply filter", optarg);
 	    break;
+	case 'l':
+	    var_dns_rr_list_limit = atoi(optarg);
+	    break;
 	case 'n':
 	    lflags |= DNS_REQ_FLAG_NCACHE_TTL;
 	    break;
 	case 'p':
 	    var_dns_ncache_ttl_fix = 1;
+	    break;
+	case 's':
+	    var_dnssec_probe = DEF_DNSSEC_PROBE;
 	    break;
 	default:
 	    usage(argv);
@@ -116,9 +124,11 @@ int     main(int argc, char **argv)
 	    vstream_printf("%s: fqdn: %s\n", name, vstring_str(fqdn));
 	    buf = vstring_alloc(100);
 	    print_rr(buf, rr);
+	    vstream_fflush(VSTREAM_OUT);
+	    if (DNS_RR_IS_TRUNCATED(rr))
+		msg_warn("one or more excess DNS_RR records were dropped");
 	    dns_rr_free(rr);
 	    vstring_free(buf);
-	    vstream_fflush(VSTREAM_OUT);
 	}
     }
     myfree((void *) types);

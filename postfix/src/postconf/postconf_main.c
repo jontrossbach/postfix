@@ -104,17 +104,15 @@
 
 void    pcf_read_parameters(void)
 {
-    char   *path;
+    const char *path;
 
     /*
      * A direct rip-off of mail_conf_read(). XXX Avoid code duplication by
      * better code decomposition.
      */
-    pcf_set_config_dir();
-    path = concatenate(var_config_dir, "/", MAIN_CONF_FILE, (char *) 0);
+    path = pcf_get_main_path();
     if (dict_load_file_xt(CONFIG_DICT, path) == 0)
 	msg_fatal("open %s: %m", path);
-    myfree(path);
 }
 
 /* pcf_set_parameters - add or override name=value pairs */
@@ -139,7 +137,14 @@ void    pcf_set_parameters(char **name_val_array)
 static void pcf_print_parameter(VSTREAM *fp, int mode, const char *name,
 				        PCF_PARAM_NODE *node)
 {
+    static VSTRING *exp_buf = 0;
+    static VSTRING *json_buf = 0;
     const char *value;
+
+    if (exp_buf == 0 && (mode & PCF_SHOW_EVAL))
+	exp_buf = vstring_alloc(100);
+    if (json_buf == 0 && (mode & PCF_SHOW_JSON))
+	json_buf = vstring_alloc(100);
 
     /*
      * Use the default or actual value.
@@ -155,9 +160,14 @@ static void pcf_print_parameter(VSTREAM *fp, int mode, const char *name,
 	    pcf_print_line(fp, mode, "%s\n", name);
 	} else {
 	    if ((mode & PCF_SHOW_EVAL) != 0 && PCF_RAW_PARAMETER(node) == 0)
-		value = pcf_expand_parameter_value((VSTRING *) 0, mode, value,
+		value = pcf_expand_parameter_value(exp_buf, mode, value,
 						   (PCF_MASTER_ENT *) 0);
-	    if ((mode & PCF_HIDE_NAME) == 0) {
+	    if (mode & PCF_SHOW_JSON) {
+		vstream_fprintf(fp, "{\"%s\": ",
+				quote_for_json(json_buf, name, -1));
+		vstream_fprintf(fp, "\"%s\"}\n",
+				quote_for_json(json_buf, value, -1));
+	    } else if ((mode & PCF_HIDE_NAME) == 0) {
 		pcf_print_line(fp, mode, "%s = %s\n", name, value);
 	    } else {
 		pcf_print_line(fp, mode, "%s\n", value);

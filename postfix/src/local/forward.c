@@ -53,6 +53,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -146,6 +149,7 @@ static FORWARD_INFO *forward_open(DELIVER_REQUEST *request, const char *sender)
     }
     close_on_exec(vstream_fileno(cleanup), CLOSE_ON_EXEC);
     if (attr_scan(cleanup, ATTR_FLAG_STRICT,
+		  RECV_ATTR_STREQ(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_CLEANUP),
 		  RECV_ATTR_STR(MAIL_ATTR_QUEUEID, buffer),
 		  ATTR_TYPE_END) != 1) {
 	vstream_fclose(cleanup);
@@ -159,7 +163,9 @@ static FORWARD_INFO *forward_open(DELIVER_REQUEST *request, const char *sender)
 #define FORWARD_CLEANUP_FLAGS \
 	(CLEANUP_FLAG_BOUNCE | CLEANUP_FLAG_MASK_INTERNAL \
 	| smtputf8_autodetect(MAIL_SRC_MASK_FORWARD) \
-	| ((request->smtputf8 & SMTPUTF8_FLAG_REQUESTED) ? \
+	| ((request->sendopts & SOPT_REQUIRETLS_ESMTP) ? \
+	CLEANUP_FLAG_REQTLS : 0) \
+	| ((request->sendopts & SMTPUTF8_FLAG_REQUESTED) ? \
 	CLEANUP_FLAG_SMTPUTF8 : 0))
 
     attr_print(cleanup, ATTR_FLAG_NONE,

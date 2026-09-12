@@ -179,6 +179,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
@@ -188,7 +193,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <wrap_netdb.h>
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -204,6 +209,7 @@
 #include <inet_proto.h>
 #include <myaddrinfo.h>
 #include <split_at.h>
+#include <known_tcp_ports.h>
 
 /* Application-specific. */
 
@@ -270,6 +276,7 @@ static int find_service(const char *service, int socktype)
     const char *proto;
     unsigned port;
 
+    service = filter_known_tcp_port(service);
     if (alldig(service)) {
 	port = atoi(service);
 	return (port < 65536 ? htons(port) : -1);
@@ -294,7 +301,7 @@ static int find_service(const char *service, int socktype)
 
 int     hostname_to_sockaddr_pf(const char *hostname, int pf,
 				        const char *service, int socktype,
-				        struct addrinfo ** res)
+				        struct addrinfo **res)
 {
 #ifdef EMULATE_IPV4_ADDRINFO
 
@@ -349,15 +356,16 @@ int     hostname_to_sockaddr_pf(const char *hostname, int pf,
      */
     if ((hp = gethostbyname(hostname)) == 0)
 	return (h_errno == TRY_AGAIN ? EAI_AGAIN : EAI_NODATA);
+    /* 202604 Claude: return EAI_NODATA when gethostbyname() returns empty. */
     if (hp->h_addrtype != AF_INET
+	|| hp->h_addr_list[0] == 0
 	|| hp->h_length != sizeof(template.sin.sin_addr))
 	return (EAI_NODATA);
 
     /*
-     * Initialize the result template.
+     * Initialize the result template. 202604 Claude: always do that.
      */
-    if (template.info.ai_addrlen == 0)
-	init_ipv4addrinfo(&template, socktype);
+    init_ipv4addrinfo(&template, socktype);
 
     /*
      * Copy the address information into an addrinfo structure.
@@ -444,6 +452,11 @@ int     hostname_to_sockaddr_pf(const char *hostname, int pf,
 	}
 #endif
     }
+    if (service) {
+	service = filter_known_tcp_port(service);
+	if (alldig(service))
+	    hints.ai_flags |= AI_NUMERICSERV;
+    }
     err = getaddrinfo(hostname, service, &hints, res);
 #if defined(BROKEN_AI_NULL_SERVICE)
     if (service == 0 && err == 0) {
@@ -462,7 +475,7 @@ int     hostname_to_sockaddr_pf(const char *hostname, int pf,
 /* hostaddr_to_sockaddr - printable address to binary address form */
 
 int     hostaddr_to_sockaddr(const char *hostaddr, const char *service,
-			             int socktype, struct addrinfo ** res)
+			             int socktype, struct addrinfo **res)
 {
 #ifdef EMULATE_IPV4_ADDRINFO
 
@@ -559,6 +572,11 @@ int     hostaddr_to_sockaddr(const char *hostaddr, const char *service,
 #endif
 	}
 #endif
+    }
+    if (service) {
+	service = filter_known_tcp_port(service);
+	if (alldig(service))
+	    hints.ai_flags |= AI_NUMERICSERV;
     }
     err = getaddrinfo(hostaddr, service, &hints, res);
 #if defined(BROKEN_AI_NULL_SERVICE)
@@ -739,13 +757,13 @@ void    myaddrinfo_control(int name,...)
 
 /* freeaddrinfo - release storage */
 
-void    freeaddrinfo(struct addrinfo * ai)
+void    freeaddrinfo(struct addrinfo *ai)
 {
     struct addrinfo *ap;
     struct addrinfo *next;
 
     /*
-     * Artefact of implementation: tolerate a null pointer argument.
+     * Artifact of implementation: tolerate a null pointer argument.
      */
     for (ap = ai; ap != 0; ap = next) {
 	next = ap->ai_next;
@@ -816,8 +834,11 @@ int     main(int argc, char **argv)
     struct addrinfo **resv;
     MAI_HOSTNAME_STR host;
     MAI_HOSTADDR_STR addr;
+    MAI_SERVNAME_STR serv;
+    MAI_SERVPORT_STR port;
     size_t  len, n;
     int     err;
+    char   *aport;
 
     msg_vstream_init(argv[0], VSTREAM_ERR);
 
@@ -828,9 +849,13 @@ int     main(int argc, char **argv)
 
     msg_info("=== hostname %s ===", argv[2]);
 
-    if ((err = hostname_to_sockaddr(argv[2], (char *) 0, 0, &info)) != 0) {
-	msg_info("hostname_to_sockaddr(%s): %s",
-	  argv[2], err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
+#define STR_OR_NULL(s) ((s) ? (s) : "(null)")
+
+    aport = split_at(argv[2], ':');
+    if ((err = hostname_to_sockaddr(argv[2], aport, 0, &info)) != 0) {
+	msg_warn("hostname_to_sockaddr(%s:%s): %s",
+		 argv[2], STR_OR_NULL(aport), err == EAI_SYSTEM ?
+		 strerror(errno) : gai_strerror(err));
     } else {
 	for (len = 0, ip = info; ip != 0; ip = ip->ai_next)
 	    len += 1;
@@ -841,20 +866,21 @@ int     main(int argc, char **argv)
 	for (n = 0; n < len; n++) {
 	    ip = resv[n];
 	    if ((err = sockaddr_to_hostaddr(ip->ai_addr, ip->ai_addrlen, &addr,
-					 (MAI_SERVPORT_STR *) 0, 0)) != 0) {
-		msg_info("sockaddr_to_hostaddr: %s",
+					    &port, 0)) != 0) {
+		msg_warn("sockaddr_to_hostaddr: %s",
 		   err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
 		continue;
 	    }
-	    msg_info("%s -> family=%d sock=%d proto=%d %s", argv[2],
-		 ip->ai_family, ip->ai_socktype, ip->ai_protocol, addr.buf);
+	    msg_info("%s:%s -> family=%d sock=%d proto=%d %s:%s",
+		     argv[2], STR_OR_NULL(aport), ip->ai_family,
+		     ip->ai_socktype, ip->ai_protocol, addr.buf, port.buf);
 	    if ((err = sockaddr_to_hostname(ip->ai_addr, ip->ai_addrlen, &host,
-					 (MAI_SERVNAME_STR *) 0, 0)) != 0) {
-		msg_info("sockaddr_to_hostname: %s",
+					    &serv, 0)) != 0) {
+		msg_warn("sockaddr_to_hostname: %s",
 		   err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
 		continue;
 	    }
-	    msg_info("%s -> %s", addr.buf, host.buf);
+	    msg_info("%s:%s -> %s:%s", addr.buf, port.buf, host.buf, serv.buf);
 	}
 	freeaddrinfo(info);
 	myfree((void *) resv);
@@ -862,23 +888,25 @@ int     main(int argc, char **argv)
 
     msg_info("=== host address %s ===", argv[3]);
 
-    if ((err = hostaddr_to_sockaddr(argv[3], (char *) 0, 0, &ip)) != 0) {
-	msg_info("hostaddr_to_sockaddr(%s): %s",
-	  argv[3], err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
+    aport = split_at(argv[3], ':');
+    if ((err = hostaddr_to_sockaddr(argv[3], aport, 0, &ip)) != 0) {
+	msg_warn("hostaddr_to_sockaddr(%s:%s): %s",
+		 argv[3], STR_OR_NULL(aport), err == EAI_SYSTEM ?
+		 strerror(errno) : gai_strerror(err));
     } else {
 	if ((err = sockaddr_to_hostaddr(ip->ai_addr, ip->ai_addrlen, &addr,
-					(MAI_SERVPORT_STR *) 0, 0)) != 0) {
-	    msg_info("sockaddr_to_hostaddr: %s",
+					&port, 0)) != 0) {
+	    msg_warn("sockaddr_to_hostaddr: %s",
 		   err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
 	} else {
-	    msg_info("%s -> family=%d sock=%d proto=%d %s", argv[3],
-		 ip->ai_family, ip->ai_socktype, ip->ai_protocol, addr.buf);
+	    msg_info("%s:%s -> family=%d sock=%d proto=%d %s:%s", argv[3], STR_OR_NULL(aport),
+		     ip->ai_family, ip->ai_socktype, ip->ai_protocol, addr.buf, port.buf);
 	    if ((err = sockaddr_to_hostname(ip->ai_addr, ip->ai_addrlen, &host,
-					 (MAI_SERVNAME_STR *) 0, 0)) != 0) {
-		msg_info("sockaddr_to_hostname: %s",
+					    &serv, 0)) != 0) {
+		msg_warn("sockaddr_to_hostname: %s",
 		   err == EAI_SYSTEM ? strerror(errno) : gai_strerror(err));
 	    } else
-		msg_info("%s -> %s", addr.buf, host.buf);
+		msg_info("%s:%s -> %s:%s", addr.buf, port.buf, host.buf, serv.buf);
 	    freeaddrinfo(ip);
 	}
     }

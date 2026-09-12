@@ -4,7 +4,7 @@ PPoossttffiixx llooggggiinngg ttoo ffiillee oorr ssttdd
 
 OOvveerrvviieeww
 
-Postfix supports it own logging system as an alternative to syslog (which
+Postfix supports its own logging system as an alternative to syslog (which
 remains the default). This is available with Postfix version 3.4 or later.
 
 Topics covered in this document:
@@ -30,8 +30,14 @@ problems for systemd-based systems.
  2. Configure Postfix to write logging, to, for example, /var/log/postfix.log.
     See also the "Logfile rotation" section below for logfile management.
 
+    In the example below, specifying maillog_file_permissions is optional
+    (Postfix 3.9 and later). The default value is 0600, i.e., only the super-
+    user can access the file; the value 0644 also adds 'group' and 'other' read
+    access.
+
         # postfix stop
         # postconf maillog_file=/var/log/postfix.log
+        # postconf maillog_file_permissions=0644 # (Postfix 3.9 and later)
         # postfix start
 
     By default, the logfile name must start with "/var" or "/dev/stdout" (the
@@ -71,9 +77,13 @@ implements the following steps:
   * After a brief pause, compress the old logfile. The compression program is
     configured with the maillog_file_compressor parameter (default: gzip).
 
+  * The next time it logs an event, postlogd(8) will create a new logfile, with
+    permissions specified with the maillog_file_permissions parameter (default:
+    0600).
+
 Notes:
 
-  * This command will not rotate a logfile with pathname under the /dev
+  * This command will not rotate a logfile with a pathname under the /dev
     directory, such as /dev/stdout.
 
   * This command does not (yet) remove old logfiles.
@@ -86,7 +96,7 @@ Background:
     as well as non-daemon programs for local mail submission or Postfix
     management.
 
-  * Logging to Postfix logfile or stdout requires the Postfix postlogd(8)
+  * Logging to the Postfix logfile or stdout requires the Postfix postlogd(8)
     service. This ensures that simultaneous logging from different programs
     will not get mixed up.
 
@@ -108,6 +118,6 @@ Limitations:
     $maillog_file (also, logging to stdout would interfere with the operation
     of some of these programs). These programs can log to postlogd(8) if they
     are run by the super-user, or if their executable file has set-gid
-    permission. Do not set this permission on programs other than postdrop(1)
-    and postqueue(1).
+    permission. Do not set this permission on programs other than postdrop(1),
+    postqueue(1), and (Postfix >= 3.7) postlog(1).
 

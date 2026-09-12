@@ -6,8 +6,9 @@
 /* SYNOPSIS
 /*	#include <postconf.h>
 /*
-/*	void	pcf_register_dbms_parameters(param_value, flag_parameter,
+/*	void	pcf_register_dbms_parameters(mode, param_value, flag_parameter,
 /*					local_scope)
+/*	int	mode;
 /*	const char *param_value;
 /*	const char *(flag_parameter) (const char *, int, PCF_MASTER_ENT *);
 /*	PCF_MASTER_ENT *local_scope;
@@ -17,6 +18,9 @@
 /*	the database name to a database-defined suffix.
 /*
 /*	Arguments:
+/* .IP mode
+/*	If PCF_WARN_UNUSED_DEPRECATED is set, warn about unused
+/*	database settings.
 /* .IP param_value
 /*	A parameter value to be searched for "type:table" strings.
 /*	When a database type is found that supports legacy-style
@@ -70,6 +74,7 @@
 
 #include <mail_conf.h>
 #include <mail_params.h>
+#include <dict_debug.h>
 #include <dict_ht.h>
 #include <dict_proxy.h>
 #include <dict_ldap.h>
@@ -77,6 +82,9 @@
 #include <dict_pgsql.h>
 #include <dict_sqlite.h>
 #include <dict_memcache.h>
+#include <dict_mongodb.h>
+#include <dict_regexp.h>
+#include <dict_pcre.h>
 
 /* Application-specific. */
 
@@ -129,26 +137,48 @@ static const char *pcf_memcache_suffixes[] = {
     0,
 };
 
+/* See mongodb_table(5). */
+
+static const char *pcf_mongodb_suffixes[] = {
+#include "pcf_mongodb_suffixes.h"
+    0,
+};
+
  /*
   * Bundle up the database types and their suffix lists.
   */
 typedef struct {
     const char *db_type;
+    int     db_class;
     const char **db_suffixes;
 } PCF_DBMS_INFO;
 
+#define PCF_DBMS_CLASS_CLIENT	(1)	/* DB name is client config path */
+#define PCF_DBMS_CLASS_REGEX	(2)	/* DB name contains regex patterns */
+
 static const PCF_DBMS_INFO pcf_dbms_info[] = {
-    DICT_TYPE_LDAP, pcf_ldap_suffixes,
-    DICT_TYPE_MYSQL, pcf_mysql_suffixes,
-    DICT_TYPE_PGSQL, pcf_pgsql_suffixes,
-    DICT_TYPE_SQLITE, pcf_sqlite_suffixes,
-    DICT_TYPE_MEMCACHE, pcf_memcache_suffixes,
-    0,
+    {DICT_TYPE_LDAP, PCF_DBMS_CLASS_CLIENT, pcf_ldap_suffixes},
+    {DICT_TYPE_MYSQL, PCF_DBMS_CLASS_CLIENT, pcf_mysql_suffixes},
+    {DICT_TYPE_PGSQL, PCF_DBMS_CLASS_CLIENT, pcf_pgsql_suffixes},
+    {DICT_TYPE_SQLITE, PCF_DBMS_CLASS_CLIENT, pcf_sqlite_suffixes},
+    {DICT_TYPE_MEMCACHE, PCF_DBMS_CLASS_CLIENT, pcf_memcache_suffixes},
+    {DICT_TYPE_MONGODB, PCF_DBMS_CLASS_CLIENT, pcf_mongodb_suffixes},
+    {DICT_TYPE_REGEXP, PCF_DBMS_CLASS_REGEX},
+    {DICT_TYPE_PCRE, PCF_DBMS_CLASS_REGEX},
+    {0},
 };
+
+ /*
+  * Workaround to prevent a false warning about "#comment after other text",
+  * when an inline pcre or regexp pattern contains "#text".
+  */
+#define PCF_DBMS_RECURSE	1	/* Parse inline {map-entry} */
+#define PCF_DBMS_NO_RECURSE	0	/* Don't parse inline {map-entry} */
 
 /* pcf_check_dbms_client - look for unused names in client configuration */
 
-static void pcf_check_dbms_client(const PCF_DBMS_INFO *dp, const char *cf_file)
+static void pcf_check_dbms_client(int mode, const PCF_DBMS_INFO *dp,
+				          const char *cf_file)
 {
     DICT   *dict;
     VSTREAM *fp;
@@ -170,7 +200,7 @@ static void pcf_check_dbms_client(const PCF_DBMS_INFO *dp, const char *cf_file)
 	 * Populate the dictionary with settings in this database client
 	 * configuration file. Don't die if a file can't be opened - some
 	 * files may contain passwords and should not be world-readable.
-	 * Note: dict_load_fp() nags about duplicate pameter settings.
+	 * Note: dict_load_fp() nags about duplicate parameter settings.
 	 */
 	dict = dict_ht_open(dict_spec, O_CREAT | O_RDWR, 0);
 	dict_register(dict_spec, dict);
@@ -202,21 +232,24 @@ static void pcf_check_dbms_client(const PCF_DBMS_INFO *dp, const char *cf_file)
 	 * code, because a database client parameter namespace is unlike the
 	 * parameter namespaces in main.cf or master.cf.
 	 */
-	for (cpp = dp->db_suffixes; *cpp; cpp++)
-	    (void) dict_del(dict, *cpp);
-	for (dir = DICT_SEQ_FUN_FIRST;
-	     dict->sequence(dict, dir, &name, &value) == DICT_STAT_SUCCESS;
-	     dir = DICT_SEQ_FUN_NEXT)
-	    msg_warn("%s: unused parameter: %s=%s", dict_spec, name, value);
+	if (mode & PCF_WARN_UNUSED_DEPRECATED) {
+	    for (cpp = dp->db_suffixes; *cpp; cpp++)
+		(void) dict_del(dict, *cpp);
+	    for (dir = DICT_SEQ_FUN_FIRST;
+	      dict->sequence(dict, dir, &name, &value) == DICT_STAT_SUCCESS;
+		 dir = DICT_SEQ_FUN_NEXT)
+		msg_warn("%s: unused parameter: %s=%s", dict_spec, name, value);
+	}
     }
     myfree(dict_spec);
 }
 
 /* pcf_register_dbms_helper - parse one possible database type:name */
 
-static void pcf_register_dbms_helper(char *str_value,
+static void pcf_register_dbms_helper(int mode, char *str_value,
          const char *(flag_parameter) (const char *, int, PCF_MASTER_ENT *),
-				             PCF_MASTER_ENT *local_scope)
+				             PCF_MASTER_ENT *local_scope,
+				             int recurse)
 {
     const PCF_DBMS_INFO *dp;
     char   *db_type;
@@ -229,27 +262,31 @@ static void pcf_register_dbms_helper(char *str_value,
      * Naive parsing. We don't really know if this substring specifies a
      * database or some other text.
      */
-    while ((db_type = mystrtokq(&str_value, CHARS_COMMA_SP, CHARS_BRACE)) != 0) {
+    while ((db_type = mystrtokq_cw(&str_value, CHARS_COMMA_SP, CHARS_BRACE,
+	 local_scope ? pcf_get_master_path() : pcf_get_main_path())) != 0) {
 	if (*db_type == CHARS_BRACE[0]) {
 	    if ((err = extpar(&db_type, CHARS_BRACE, EXTPAR_FLAG_NONE)) != 0) {
 		/* XXX Encapsulate this in pcf_warn() function. */
 		if (local_scope)
-		    msg_warn("%s:%s: %s",
-			     MASTER_CONF_FILE, local_scope->name_space, err);
+		    msg_warn("%s:%s: %s", pcf_get_master_path(),
+			     local_scope->name_space, err);
 		else
-		    msg_warn("%s: %s", MAIN_CONF_FILE, err);
+		    msg_warn("%s: %s", pcf_get_main_path(), err);
 		myfree(err);
 	    }
-	    pcf_register_dbms_helper(db_type, flag_parameter, local_scope);
+	    if (recurse)
+		pcf_register_dbms_helper(mode, db_type, flag_parameter,
+					 local_scope, recurse);
 	    continue;
 	}
 
 	/*
-	 * Skip over "proxy:" maptypes, to emulate the proxymap(8) server's
-	 * behavior when opening a local database configuration file.
+	 * Skip over adapter maptypes "proxy:" and "debug:", to emulate their
+	 * behavior when wrapping a local database configuration file.
 	 */
 	while ((prefix = split_at(db_type, ':')) != 0
-	       && strcmp(db_type, DICT_TYPE_PROXY) == 0)
+	       && (strcmp(db_type, DICT_TYPE_PROXY) == 0 ||
+		   strcmp(db_type, DICT_TYPE_DEBUG) == 0))
 	    db_type = prefix;
 
 	if (prefix == 0)
@@ -267,7 +304,8 @@ static void pcf_register_dbms_helper(char *str_value,
 	if (*prefix == '/') {
 	    for (dp = pcf_dbms_info; dp->db_type != 0; dp++) {
 		if (strcmp(db_type, dp->db_type) == 0) {
-		    pcf_check_dbms_client(dp, prefix);
+		    if (dp->db_class == PCF_DBMS_CLASS_CLIENT)
+			pcf_check_dbms_client(mode, dp, prefix);
 		    break;
 		}
 	    }
@@ -282,29 +320,40 @@ static void pcf_register_dbms_helper(char *str_value,
 	 * local or global namespace.
 	 */
 	if (*prefix != '.') {
+	    int     next_recurse = recurse;
+
 	    if (*prefix == CHARS_BRACE[0]) {
 		if ((err = extpar(&prefix, CHARS_BRACE, EXTPAR_FLAG_NONE)) != 0) {
 		    /* XXX Encapsulate this in pcf_warn() function. */
 		    if (local_scope)
-			msg_warn("%s:%s: %s",
-				 MASTER_CONF_FILE, local_scope->name_space,
-				 err);
+			msg_warn("%s:%s: %s", pcf_get_master_path(),
+				 local_scope->name_space, err);
 		    else
-			msg_warn("%s: %s", MAIN_CONF_FILE, err);
+			msg_warn("%s: %s", pcf_get_main_path(), err);
 		    myfree(err);
 		}
-		pcf_register_dbms_helper(prefix, flag_parameter, local_scope);
+		for (dp = pcf_dbms_info; dp->db_type != 0; dp++) {
+		    if (strcmp(db_type, dp->db_type) == 0) {
+			if (dp->db_class == PCF_DBMS_CLASS_REGEX)
+			    next_recurse = PCF_DBMS_NO_RECURSE;
+			break;
+		    }
+		}
+		pcf_register_dbms_helper(mode, prefix, flag_parameter,
+					 local_scope, next_recurse);
 		continue;
 	    } else {
 		for (dp = pcf_dbms_info; dp->db_type != 0; dp++) {
 		    if (strcmp(db_type, dp->db_type) == 0) {
-			for (cpp = dp->db_suffixes; *cpp; cpp++) {
-			    vstring_sprintf(candidate ? candidate :
+			if (dp->db_class == PCF_DBMS_CLASS_CLIENT) {
+			    for (cpp = dp->db_suffixes; *cpp; cpp++) {
+				vstring_sprintf(candidate ? candidate :
 					    (candidate = vstring_alloc(30)),
-					    "%s_%s", prefix, *cpp);
-			    flag_parameter(STR(candidate),
+						"%s_%s", prefix, *cpp);
+				flag_parameter(STR(candidate),
 				  PCF_PARAM_FLAG_DBMS | PCF_PARAM_FLAG_USER,
-					   local_scope);
+					       local_scope);
+			    }
 			}
 			break;
 		    }
@@ -316,7 +365,7 @@ static void pcf_register_dbms_helper(char *str_value,
 
 /* pcf_register_dbms_parameters - look for database_type:prefix_name */
 
-void    pcf_register_dbms_parameters(const char *param_value,
+void    pcf_register_dbms_parameters(int mode, const char *param_value,
          const char *(flag_parameter) (const char *, int, PCF_MASTER_ENT *),
 				             PCF_MASTER_ENT *local_scope)
 {
@@ -332,7 +381,8 @@ void    pcf_register_dbms_parameters(const char *param_value,
 	buffer = vstring_alloc(100);
     bufp = pcf_expand_parameter_value(buffer, PCF_SHOW_EVAL, param_value,
 				      local_scope);
-    pcf_register_dbms_helper(bufp, flag_parameter, local_scope);
+    pcf_register_dbms_helper(mode, bufp, flag_parameter, local_scope,
+			     PCF_DBMS_RECURSE);
 }
 
 #endif

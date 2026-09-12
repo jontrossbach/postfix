@@ -33,19 +33,8 @@ update: ../../libexec/$(PROG)
 ../../libexec/$(PROG): $(PROG)
 	cp $(PROG) ../../libexec
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-lint:
-	lint $(DEFS) $(SRCS) $(LINTFIX)
-
 clean:
 	rm -f *.o *core $(PROG) $(TESTPROG) junk 
-	rm -rf printfck
 
 tidy:	clean
 
@@ -80,6 +69,7 @@ error.o: ../../include/msg.h
 error.o: ../../include/msg_stats.h
 error.o: ../../include/mymalloc.h
 error.o: ../../include/nvtable.h
+error.o: ../../include/pol_stats.h
 error.o: ../../include/recipient_list.h
 error.o: ../../include/sys_defs.h
 error.o: ../../include/sys_exits.h

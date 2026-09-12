@@ -40,6 +40,17 @@
 /*	with exactly one recipient \fBuser@example.com\fR:
 /* .sp
 /* .nf
+/*	postqueue -j | jq -r '
+/*	    # See JSON OBJECT FORMAT section in the postqueue(1) manpage
+/*	    select(.recipients[0].address == "user@example.com")
+/*	    | select(.recipients[1].address == null)
+/*	    | .queue_id
+/*	 ' | postsuper -d -
+/* .fi
+/* .sp
+/*	(note the "jq -r" option), or the historical form:
+/* .sp
+/* .nf
 /*	mailq | tail -n +2 | grep -v '^ *(' | awk  'BEGIN { RS = "" }
 /*	    # $7=sender, $8=recipient1, $9=recipient2
 /*	    { if ($8 == "user@example.com" && $9 == "")
@@ -277,7 +288,7 @@
 /*	The names of queue directories that are split across multiple
 /*	subdirectory levels.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
@@ -1042,6 +1053,8 @@ static void super(const char **queues, int action)
 	     * number.
 	     */
 	    if ((action & ACTION_STRUCT)
+	    /* 202607 Qualys+Mythos: skip short paths. */
+		&& strlen(path) > SUFFIX_LEN
 		&& strcmp(path + (strlen(path) - SUFFIX_LEN), SUFFIX) == 0) {
 		path[strlen(path) - SUFFIX_LEN] = 0;	/* XXX */
 		if (!mail_queue_id_ok(path)) {

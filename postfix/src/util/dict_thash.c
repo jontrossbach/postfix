@@ -46,6 +46,7 @@
 /* Utility library. */
 
 #include <msg.h>
+#include <mymalloc.h>
 #include <iostuff.h>
 #include <vstring.h>
 #include <stringops.h>
@@ -109,7 +110,7 @@ DICT   *dict_thash_open(const char *path, int open_flags, int dict_flags)
 	/*
 	 * Reuse the "internal" dictionary type.
 	 */
-	dict = dict_open3(DICT_TYPE_HT, path, open_flags, dict_flags);
+	dict = dict_ht_open(path, open_flags, dict_flags);
 	dict_type_override(dict, DICT_TYPE_THASH);
 
 	/*
@@ -126,7 +127,7 @@ DICT   *dict_thash_open(const char *path, int open_flags, int dict_flags)
 	     */
 	    if ((dict->flags & DICT_FLAG_UTF8_ACTIVE)
 		&& allascii(STR(line_buffer)) == 0
-	    && valid_utf8_string(STR(line_buffer), LEN(line_buffer)) == 0) {
+		&& valid_utf8_stringz(STR(line_buffer)) == 0) {
 		msg_warn("%s, line %d: non-UTF-8 input \"%s\""
 			 " -- ignoring this line",
 			 VSTREAM_PATH(fp), lineno, STR(line_buffer));
@@ -180,10 +181,28 @@ DICT   *dict_thash_open(const char *path, int open_flags, int dict_flags)
 			 " is this an alias file?", path, lineno);
 
 	    /*
+	     * Optionally treat the value as a filename, and replace the
+	     * value with the BASE64-encoded content of the named file.
+	     */
+	    if (dict_flags & DICT_FLAG_SRC_RHS_IS_FILE) {
+		VSTRING *base64_buf;
+		char   *err;
+
+		if ((base64_buf = dict_file_to_b64(dict, value)) == 0) {
+		    err = dict_file_get_error(dict);
+		    msg_warn("%s, line %d: %s: skipping this entry",
+			     VSTREAM_PATH(fp), lineno, err);
+		    myfree(err);
+		    continue;
+		}
+		value = vstring_str(base64_buf);
+	    }
+
+	    /*
 	     * Store the value under the key. Handle duplicates
 	     * appropriately. XXX Move this into dict_ht, but 1) that map
 	     * ignores duplicates by default and we would have to check that
-	     * we won't break existing code that depends on such benavior; 2)
+	     * we won't break existing code that depends on such behavior; 2)
 	     * by inlining the checks here we can degrade gracefully instead
 	     * of terminating with a fatal error. See comment in
 	     * dict_inline.c.
@@ -232,5 +251,5 @@ DICT   *dict_thash_open(const char *path, int open_flags, int dict_flags)
     dict->owner.uid = st.st_uid;
     dict->owner.status = (st.st_uid != 0);
 
-    DICT_THASH_OPEN_RETURN(DICT_DEBUG (dict));
+    DICT_THASH_OPEN_RETURN(dict);
 }

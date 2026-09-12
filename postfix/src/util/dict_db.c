@@ -446,8 +446,10 @@ static int dict_db_sequence(DICT *dict, int function,
      */
     switch (function) {
     case DICT_SEQ_FUN_FIRST:
-	if (dict_db->cursor == 0)
-	    DICT_DB_CURSOR(db, &(dict_db->cursor));
+	if (dict_db->cursor == 0
+	    && (status = DICT_DB_CURSOR(db, &(dict_db->cursor))) != 0)
+	    msg_fatal("error [%d] initializing cursor for %s: %m",
+		      status, dict_db->dict.name);
 	db_function = DB_FIRST;
 	break;
     case DICT_SEQ_FUN_NEXT:
@@ -650,9 +652,9 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
 		       DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH,
 			       major_version, minor_version, patch_version));
     if (msg_verbose) {
-	msg_info("Compiled against Berkeley DB: %d.%d.%d\n",
+	msg_info("Compiled against Berkeley DB: %d.%d.%d",
 		 DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH);
-	msg_info("Run-time linked against Berkeley DB: %d.%d.%d\n",
+	msg_info("Run-time linked against Berkeley DB: %d.%d.%d",
 		 major_version, minor_version, patch_version);
     }
 #else
@@ -687,7 +689,8 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
 	if (dbenv) dbenv->close(dbenv, 0); \
 	if (lock_fd >= 0) (void) close(lock_fd); \
 	if (db_base_buf) vstring_free(db_base_buf); \
-	if (db_path) myfree(db_path); return (_dict); \
+	if (db_path) myfree(db_path); \
+	return (_dict); \
     } while (0)
 #endif
 
@@ -753,7 +756,7 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
     if (type == DB_HASH && db->set_h_nelem(db, DICT_DB_NELM) != 0)
 	msg_fatal("set DB hash element count %d: %m", DICT_DB_NELM);
     db_base_buf = vstring_alloc(100);
-#if DB_VERSION_MAJOR == 6 || DB_VERSION_MAJOR == 5 || \
+#if DB_VERSION_MAJOR == 18 || DB_VERSION_MAJOR == 6 || DB_VERSION_MAJOR == 5 || \
 	(DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR > 0)
     if ((errno = db->open(db, 0, sane_basename(db_base_buf, db_path),
 			  0, type, db_flags, 0644)) != 0)
@@ -788,7 +791,8 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
     dict_db->dict.stat_fd = dbfd;
     if (fstat(dict_db->dict.stat_fd, &st) < 0)
 	msg_fatal("dict_db_open: fstat: %m");
-    dict_db->dict.mtime = st.st_mtime;
+    if (open_flags == O_RDONLY)
+	dict_db->dict.mtime = st.st_mtime;
     dict_db->dict.owner.uid = st.st_uid;
     dict_db->dict.owner.status = (st.st_uid != 0);
 
@@ -797,6 +801,7 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
      * the source file changed only seconds ago.
      */
     if ((dict_flags & DICT_FLAG_LOCK) != 0
+	&& open_flags == O_RDONLY
 	&& stat(path, &st) == 0
 	&& st.st_mtime > dict_db->dict.mtime
 	&& st.st_mtime < time((time_t *) 0) - 100)
@@ -820,7 +825,7 @@ static DICT *dict_db_open(const char *class, const char *path, int open_flags,
     dict_db->val_buf = 0;
 
     myfree(db_path);
-    return (DICT_DEBUG (&dict_db->dict));
+    return (&dict_db->dict);
 }
 
 /* dict_hash_open - create association with data base */

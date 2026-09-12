@@ -40,7 +40,7 @@
 /*	at any stage.
 /*
 /*	No support is announced for AUTH, XCLIENT or XFORWARD.
-/*	Clients that need this should be whitelisted or should talk
+/*	Clients that need this should be allowlisted or should talk
 /*	directly to the submission service.
 /*
 /*	The engine rejects RCPT TO and VRFY commands with the
@@ -213,7 +213,7 @@ static void psc_smtpd_read_event(int, void *);
  /*
   * Encapsulation. The STARTTLS, EHLO and AUTH command handlers temporarily
   * suspend SMTP command events, send an asynchronous proxy request, and
-  * resume SMTP command events after receiving the asynchrounous proxy
+  * resume SMTP command events after receiving the asynchronous proxy
   * response (the EHLO handler must asynchronously talk to the auth server
   * before it can announce the SASL mechanism list; the list can depend on
   * the client IP address and on the presence on TLS encryption).
@@ -435,11 +435,12 @@ static int psc_starttls_cmd(PSC_STATE *state, char *args)
      * unavailable when tlsproxy(8) detects the problem too late.
      */
     if (PSC_SMTPD_NEXT_TOKEN(args) != 0)
-	return (PSC_SEND_REPLY(state, "501 Syntax: EHLO hostname\r\n"));
+	return (PSC_SEND_REPLY(state, "501 5.5.4 Syntax: STARTTLS\r\n"));
     if (state->flags & PSC_STATE_FLAG_USING_TLS)
 	return (PSC_SEND_REPLY(state,
 			       "554 5.5.1 Error: TLS already active\r\n"));
-    if (var_psc_use_tls == 0 || (state->ehlo_discard_mask & EHLO_MASK_STARTTLS))
+#ifdef USE_TLS
+    if (!psc_tls_ready)
 	return (PSC_SEND_REPLY(state,
 			   "502 5.5.1 Error: command not implemented\r\n"));
 
@@ -449,6 +450,10 @@ static int psc_starttls_cmd(PSC_STATE *state, char *args)
     PSC_SUSPEND_SMTP_CMD_EVENTS(state);
     psc_starttls_open(state, psc_starttls_resume);
     return (0);
+#else
+    return (PSC_SEND_REPLY(state,
+			   "502 5.5.1 Error: command not implemented\r\n"));
+#endif
 }
 
 /* psc_extract_addr - extract MAIL/RCPT address, unquoted form */
@@ -637,7 +642,7 @@ static int psc_bdat_cmd(PSC_STATE *state, char *args)
     else if (state->sender == 0)
 	PSC_CLEAR_EVENT_DROP_SESSION_STATE(state,
 					   psc_smtpd_time_event,
-				  "554 5.5.1 Error: need RCPT command\r\n");
+				  "554 5.5.1 Error: need MAIL command\r\n");
     else
 	PSC_CLEAR_EVENT_DROP_SESSION_STATE(state,
 					   psc_smtpd_time_event,
@@ -839,9 +844,10 @@ static void psc_smtpd_read_event(int event, void *context)
 
 	    /*
 	     * Sanity check. We don't want to store infinitely long commands.
+	     * 
+	     * Qualys+Mythos: make the VSTRING_LEN test unconditional.
 	     */
-	    if (state->read_state == PSC_SMTPD_CMD_ST_ANY
-		&& VSTRING_LEN(state->cmd_buffer) >= var_line_limit) {
+	    if (VSTRING_LEN(state->cmd_buffer) >= var_line_limit) {
 		msg_info("COMMAND LENGTH LIMIT from [%s]:%s after %s",
 			 PSC_CLIENT_ADDR_PORT(state), state->where);
 		PSC_CLEAR_EVENT_DROP_SESSION_STATE(state, psc_smtpd_time_event,
@@ -874,7 +880,8 @@ static void psc_smtpd_read_event(int event, void *context)
 	    }
 
 	    /*
-	     * Bare newline test.
+	     * Bare newline test. Note: at this point, state->cmd_buffer is
+	     * not null-terminated and may contain embedded null bytes.
 	     */
 	    if (ch == '\n') {
 		if ((state->flags & PSC_STATE_MASK_BARLF_TODO_SKIP)
@@ -902,7 +909,7 @@ static void psc_smtpd_read_event(int event, void *context)
 		    case PSC_ACT_IGNORE:
 			PSC_UNFAIL_SESSION_STATE(state,
 						 PSC_STATE_FLAG_BARLF_FAIL);
-			/* Temporarily whitelist until something expires. */
+			/* Temporarily allowlist until something expires. */
 			PSC_PASS_SESSION_STATE(state, "bare newline test",
 					       PSC_STATE_FLAG_BARLF_PASS);
 			expire_time[PSC_TINDX_BARLF] = event_time() + psc_min_ttl;
@@ -929,11 +936,19 @@ static void psc_smtpd_read_event(int event, void *context)
 	}
 
 	/*
+	 * Avoid complaints from Postfix maps about malformed content. Note:
+	 * this will stop at the first null byte, just like the code that
+	 * parses the command name or command arguments.
+	 */
+#define PSC_BAD_UTF8(str) \
+	(var_smtputf8_enable && !valid_utf8_stringz(str))
+
+	/*
 	 * Terminate the command buffer, and apply the last-resort command
 	 * editing workaround.
 	 */
 	VSTRING_TERMINATE(state->cmd_buffer);
-	if (psc_cmd_filter != 0) {
+	if (psc_cmd_filter != 0 && !PSC_BAD_UTF8(STR(state->cmd_buffer))) {
 	    const char *cp;
 
 	    for (cp = STR(state->cmd_buffer); *cp && IS_SPACE_TAB(*cp); cp++)
@@ -1000,6 +1015,7 @@ static void psc_smtpd_read_event(int event, void *context)
 	if ((state->flags & PSC_STATE_MASK_NSMTP_TODO_SKIP)
 	    == PSC_STATE_FLAG_NSMTP_TODO && cmdp->name == 0
 	    && (is_header(command)
+		|| PSC_BAD_UTF8(command)
 	/* Ignore forbid_cmds lookup errors. Non-critical feature. */
 		|| (*var_psc_forbid_cmds
 		    && string_list_match(psc_forbid_cmds, command)))) {
@@ -1028,7 +1044,7 @@ static void psc_smtpd_read_event(int event, void *context)
 	    case PSC_ACT_IGNORE:
 		PSC_UNFAIL_SESSION_STATE(state,
 					 PSC_STATE_FLAG_NSMTP_FAIL);
-		/* Temporarily whitelist until something else expires. */
+		/* Temporarily allowlist until something else expires. */
 		PSC_PASS_SESSION_STATE(state, "non-smtp test",
 				       PSC_STATE_FLAG_NSMTP_PASS);
 		expire_time[PSC_TINDX_NSMTP] = event_time() + psc_min_ttl;
@@ -1066,7 +1082,7 @@ static void psc_smtpd_read_event(int event, void *context)
 	    case PSC_ACT_IGNORE:
 		PSC_UNFAIL_SESSION_STATE(state,
 					 PSC_STATE_FLAG_PIPEL_FAIL);
-		/* Temporarily whitelist until something else expires. */
+		/* Temporarily allowlist until something else expires. */
 		PSC_PASS_SESSION_STATE(state, "pipelining test",
 				       PSC_STATE_FLAG_PIPEL_PASS);
 		expire_time[PSC_TINDX_PIPEL] = event_time() + psc_min_ttl;
@@ -1228,49 +1244,16 @@ void    psc_smtpd_init(void)
     psc_smtpd_helo_reply = mystrdup(STR(psc_temp));
 
     /*
-     * STARTTLS support. Note the complete absence of #ifdef USE_TLS
-     * throughout the postscreen(8) source code. If Postfix is built without
-     * TLS support, then the TLS proxy will simply report that TLS is not
-     * available, and conventional error handling will take care of the
-     * issue.
-     * 
-     * Legacy code copied from smtpd(8). The pre-fabricated EHLO reply depends
-     * on this.
+     * STARTTLS support. This affects the EHLO greeting.
      */
-    if (*var_psc_tls_level) {
-	switch (tls_level_lookup(var_psc_tls_level)) {
-	default:
-	    msg_fatal("Invalid TLS level \"%s\"", var_psc_tls_level);
-	    /* NOTREACHED */
-	    break;
-	case TLS_LEV_SECURE:
-	case TLS_LEV_VERIFY:
-	case TLS_LEV_FPRINT:
-	    msg_warn("%s: unsupported TLS level \"%s\", using \"encrypt\"",
-		     VAR_PSC_TLS_LEVEL, var_psc_tls_level);
-	    /* FALLTHROUGH */
-	case TLS_LEV_ENCRYPT:
-	    var_psc_enforce_tls = var_psc_use_tls = 1;
-	    break;
-	case TLS_LEV_MAY:
-	    var_psc_enforce_tls = 0;
-	    var_psc_use_tls = 1;
-	    break;
-	case TLS_LEV_NONE:
-	    var_psc_enforce_tls = var_psc_use_tls = 0;
-	    break;
-	}
-    }
-    var_psc_use_tls = var_psc_use_tls || var_psc_enforce_tls;
-#ifdef TODO_SASL_AUTH
-    var_psc_tls_auth_only = var_psc_tls_auth_only || var_psc_enforce_tls;
-#endif
+    psc_tls_pre_jail();
 
     /*
      * Initialize the EHLO reply. Once for plaintext sessions, and once for
      * TLS sessions.
      */
-    psc_smtpd_format_ehlo_reply(psc_temp, psc_ehlo_discard_mask);
+    psc_smtpd_format_ehlo_reply(psc_temp, psc_ehlo_discard_mask
+				| (psc_tls_ready ? 0 : EHLO_MASK_STARTTLS));
     psc_smtpd_ehlo_reply_plain = mystrdup(STR(psc_temp));
 
     psc_smtpd_format_ehlo_reply(psc_temp,

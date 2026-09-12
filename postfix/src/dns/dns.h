@@ -54,6 +54,10 @@
 
 #endif
 
+#ifndef NS_INT16SZ
+#define NS_INT16SZ	2
+#endif
+
  /*
   * Provide API compatibility for systems without res_nxxx() API. Also
   * require calling dns_get_h_errno() instead of directly accessing the
@@ -88,7 +92,7 @@
 
  /*-
   * TLSA: https://tools.ietf.org/html/rfc6698#section-7.1
-  * RRSIG: http://tools.ietf.org/html/rfc4034#section-3
+  * RRSIG: https://tools.ietf.org/html/rfc4034#section-3
   *
   * We don't request RRSIG, but we get it "for free" when we send the DO-bit.
   */
@@ -158,11 +162,20 @@ typedef struct DNS_RR {
     unsigned short class;		/* C_IN, etc. */
     unsigned int ttl;			/* always */
     unsigned int dnssec_valid;		/* DNSSEC validated */
-    unsigned short pref;		/* T_MX only */
+    unsigned short pref;		/* T_MX and T_SRV record related */
+    unsigned short weight;		/* T_SRV related, defined in rfc2782 */
+    unsigned short port;		/* T_SRV related, defined in rfc2782 */
+    /* Assume that flags lives in what was previously padding */
+    unsigned short flags;		/* DNS_RR_FLAG_XX, see below */
     struct DNS_RR *next;		/* linkage */
     size_t  data_len;			/* actual data size */
-    char    data[1];			/* actually a bunch of data */
+    char   *data;			/* a bunch of data */
+    /* Add new fields at the end, for ABI forward compatibility. */
 } DNS_RR;
+
+#define DNS_RR_FLAG_TRUNCATED	(1<<0)
+
+#define DNS_RR_IS_TRUNCATED(rr)	((rr)->flags & DNS_RR_FLAG_TRUNCATED)
 
  /*
   * dns_strerror.c
@@ -183,20 +196,38 @@ extern char *dns_strrecord(VSTRING *, DNS_RR *);
  /*
   * dns_rr.c
   */
+#define DNS_RR_NOPREF	(0)
+#define DNS_RR_NOWEIGHT	(0)
+#define DNS_RR_NOPORT	(0)
+
+#define dns_rr_create_noport(qname, rname, type, class, ttl, pref, data, \
+				data_len) \
+	dns_rr_create((qname), (rname), (type), (class), (ttl), \
+	(pref), DNS_RR_NOWEIGHT, DNS_RR_NOPORT, (data), (data_len))
+
+#define dns_rr_create_nopref(qname, rname, type, class, ttl, data, data_len) \
+	dns_rr_create_noport((qname), (rname), (type), (class), (ttl), \
+	DNS_RR_NOPREF, (data), (data_len))
+
 extern DNS_RR *dns_rr_create(const char *, const char *,
 			             ushort, ushort,
 			             unsigned, unsigned,
+			             unsigned, unsigned,
 			             const char *, size_t);
 extern void dns_rr_free(DNS_RR *);
+extern DNS_RR *dns_rr_full_copy(DNS_RR *);
 extern DNS_RR *dns_rr_copy(DNS_RR *);
 extern DNS_RR *dns_rr_append(DNS_RR *, DNS_RR *);
 extern DNS_RR *dns_rr_sort(DNS_RR *, int (*) (DNS_RR *, DNS_RR *));
+extern DNS_RR *dns_srv_rr_sort(DNS_RR *);
 extern int dns_rr_compare_pref_ipv6(DNS_RR *, DNS_RR *);
 extern int dns_rr_compare_pref_ipv4(DNS_RR *, DNS_RR *);
 extern int dns_rr_compare_pref_any(DNS_RR *, DNS_RR *);
 extern int dns_rr_compare_pref(DNS_RR *, DNS_RR *);
 extern DNS_RR *dns_rr_shuffle(DNS_RR *);
 extern DNS_RR *dns_rr_remove(DNS_RR *, DNS_RR *);
+extern DNS_RR *dns_rr_detach(DNS_RR *, DNS_RR *);
+extern int var_dns_rr_list_limit;
 
  /*
   * dns_rr_to_pa.c
@@ -239,8 +270,9 @@ extern int dns_lookup_x(const char *, unsigned, unsigned, DNS_RR **,
 extern int dns_lookup_rl(const char *, unsigned, DNS_RR **, VSTRING *,
 			         VSTRING *, int *, int,...);
 extern int dns_lookup_rv(const char *, unsigned, DNS_RR **, VSTRING *,
-			         VSTRING *, int *, int, unsigned *);
+			         VSTRING *, int *, int, const unsigned *);
 extern int dns_get_h_errno(void);
+extern void dns_set_h_errno(int);
 
 #define dns_lookup(name, type, rflags, list, fqdn, why) \
     dns_lookup_x((name), (type), (rflags), (list), (fqdn), (why), (int *) 0, \
@@ -256,7 +288,12 @@ extern int dns_get_h_errno(void);
 	(lflags), (ltype))
 
  /*
-  * Request flags.
+  * The dns_lookup() rflag that requests DNSSEC validation.
+  */
+#define DNS_WANT_DNSSEC_VALIDATION(rflags)      ((rflags) & RES_USE_DNSSEC)
+
+ /*
+  * lflags.
   */
 #define DNS_REQ_FLAG_STOP_OK	(1<<0)
 #define DNS_REQ_FLAG_STOP_INVAL	(1<<1)
@@ -290,8 +327,9 @@ extern int dns_get_h_errno(void);
   * Below is the precedence order. The order between DNS_RETRY and DNS_NOTFOUND
   * is arbitrary.
   */
-#define DNS_RECURSE	(-7)		/* internal only: recursion needed */
-#define DNS_NOTFOUND	(-6)		/* query ok, data not found */
+#define DNS_RECURSE	(-8)		/* internal only: recursion needed */
+#define DNS_NOTFOUND	(-7)		/* query ok, data not found */
+#define DNS_NULLSRV	(-6)		/* query ok, service unavailable */
 #define DNS_NULLMX	(-5)		/* query ok, service unavailable */
 #define DNS_FAIL	(-4)		/* query failed, don't retry */
 #define DNS_INVAL	(-3)		/* query ok, malformed reply */
@@ -302,7 +340,7 @@ extern int dns_get_h_errno(void);
  /*
   * How long can a DNS name or single text value be?
   */
-#define DNS_NAME_LEN	1024
+#define DNS_NAME_LEN	MAXDNAME	/* From <arpa/nameser.h */
 
  /*
   * dns_rr_filter.c.
@@ -320,6 +358,18 @@ extern int dns_rr_filter_execute(DNS_RR **);
   * dns_str_resflags.c
   */
 const char *dns_str_resflags(unsigned long);
+
+ /*
+  * dns_sec.c.
+  */
+#define DNS_SEC_FLAG_AVAILABLE	(1<<0)	/* got some DNSSEC validated reply */
+#define DNS_SEC_FLAG_DONT_PROBE	(1<<1)	/* probe already sent, or disabled */
+
+#define DNS_SEC_STATS_SET(flags) (dns_sec_stats |= (flags))
+#define DNS_SEC_STATS_TEST(flags) (dns_sec_stats & (flags))
+
+extern int dns_sec_stats;		/* See DNS_SEC_FLAG_XXX above */
+extern void dns_sec_probe(int);
 
 /* LICENSE
 /* .ad

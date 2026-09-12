@@ -87,7 +87,7 @@ Initialize alias database. See the \fBnewaliases\fR
 command above.
 .IP \fB\-bl\fR
 Go into daemon mode. To accept only local connections as
-with Sendmail\'s \fB\-bl\fR option, specify "\fBinet_interfaces
+with Sendmail's \fB\-bl\fR option, specify "\fBinet_interfaces
 = loopback\fR" in the Postfix \fBmain.cf\fR configuration
 file.
 .IP \fB\-bm\fR
@@ -146,7 +146,7 @@ parameter instead.
 Initialize alias database. See the \fBnewaliases\fR
 command above.
 .IP "\fB\-i\fR"
-When reading a message from standard input, don\'t treat a line
+When reading a message from standard input, don't treat a line
 with only a \fB.\fR character as the end of input.
 .IP "\fB\-L \fIlabel\fR (ignored)"
 The logging label. Use the \fBsyslog_name\fR configuration
@@ -164,19 +164,36 @@ notification when delivery is delayed), or \fBsuccess\fR
 This feature is available in Postfix 2.3 and later.
 .IP "\fB\-n\fR (ignored)"
 Backwards compatibility.
-.IP "\fB\-oA\fIalias_database\fR"
-Non\-default alias database. Specify \fIpathname\fR or
-\fItype\fR:\fIpathname\fR. See \fBpostalias\fR(1) for
-details.
+.IP "\fB\-O requiretls=yes\fR"
+.IP "\fB\-O requiretls=no\fR"
+When delivering a message to an SMTP or LMTP server, the
+connection must use TLS with a verified server certificate,
+and that server must support REQUIRETLS. The "requiretls" name
+and option value are case\-insensitive. REQUIRETLS enforcement
+is controlled with the configuration parameters requiretls_enable,
+smtp_requiretls_policy, and lmtp_requiretls_policy.
+
+This feature is available in Postfix 3.11 and later.
+.IP "\fB\-O smtputf8=yes\fR"
+.IP "\fB\-O smtputf8=no\fR"
+When delivering a message to an SMTP or LMTP server, and an
+envelope address or message header contains UTF8 text, that server
+must support SMTPUTF8. The "smtputf8" option name and value
+are case\-insensitive.
+
+This feature is available in Postfix 3.11 and later.
 .IP "\fB\-O \fIoption=value\fR (ignored)"
 Set the named \fIoption\fR to \fIvalue\fR. Use the equivalent
 configuration parameter in \fBmain.cf\fR instead.
+.IP "\fB\-oA\fIalias_database\fR"
+Non\-default alias database. Specify \fIpathname\fR or
+\fItype\fR:\fIpathname\fR. See \fBpostalias\fR(1) for details.
 .IP "\fB\-o7\fR (ignored)"
 .IP "\fB\-o8\fR (ignored)"
 To send 8\-bit or binary content, use an appropriate MIME encapsulation
 and specify the appropriate \fB\-B\fR command\-line option.
 .IP "\fB\-oi\fR"
-When reading a message from standard input, don\'t treat a line
+When reading a message from standard input, don't treat a line
 with only a \fB.\fR character as the end of input.
 .IP "\fB\-om\fR (ignored)"
 The sender is never eliminated from alias etc. expansions.
@@ -431,7 +448,7 @@ and \fBpostmap\fR(1) commands.
 The time after which the sender receives a copy of the message
 headers of mail that is still queued.
 .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-The list of environment parameters that a privileged Postfix
+The list of environment variables that a privileged Postfix
 process will import from a non\-Postfix parent process, or name=value
 environment overrides.
 .IP "\fBmail_owner (postfix)\fR"
@@ -440,9 +457,10 @@ daemon processes.
 .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
 The location of the Postfix top\-level queue directory.
 .IP "\fBremote_header_rewrite_domain (empty)\fR"
-Don't rewrite message headers from remote clients at all when
-this parameter is empty; otherwise, rewrite message headers and
-append the specified domain name to incomplete addresses.
+Rewrite or add message headers in mail from remote clients if
+the remote_header_rewrite_domain parameter value is non\-empty,
+updating incomplete addresses with the domain specified in the
+remote_header_rewrite_domain parameter, and adding missing headers.
 .IP "\fBsyslog_facility (mail)\fR"
 The syslog facility of Postfix logging.
 .IP "\fBsyslog_name (see 'postconf -d' output)\fR"
@@ -461,6 +479,11 @@ these directories belong to additional Postfix instances that share
 the Postfix executable files and documentation with the default
 Postfix instance, and that are started, stopped, etc., together
 with the default Postfix instance.
+.PP
+Postfix 3.11 and later:
+.IP "\fBrequiretls_enable (yes)\fR"
+Enable support for the ESMTP verb "REQUIRETLS" in the "MAIL
+FROM" command.
 .SH "FILES"
 .na
 .nf

@@ -19,7 +19,7 @@
 /* .IP block_mode
 /*	Either NON_BLOCKING for a non-blocking socket, or BLOCKING for
 /*	blocking mode.
-/* DIAGNOSIICS
+/* DIAGNOSTICS
 /*	Fatal errors: path too large, can't create socket.
 /*
 /*	Other errors result in a -1 result value, with errno indicating
@@ -60,6 +60,7 @@
 int     unix_dgram_connect(const char *path, int block_mode)
 {
     const char myname[] = "unix_dgram_connect";
+
 #undef sun
     struct sockaddr_un sun;
     ssize_t path_len;

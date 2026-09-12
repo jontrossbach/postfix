@@ -32,19 +32,8 @@ update: ../../bin/$(PROG)
 ../../bin/$(PROG): $(PROG)
 	cp $(PROG) ../../bin
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-lint:
-	lint $(DEFS) $(SRCS) $(LINTFIX)
-
 clean:
 	rm -f *.o *core $(PROG) $(TESTPROG) junk 
-	rm -rf printfck
 
 tidy:	clean
 
@@ -97,6 +86,7 @@ sendmail.o: ../../include/recipient_list.h
 sendmail.o: ../../include/record.h
 sendmail.o: ../../include/resolve_clnt.h
 sendmail.o: ../../include/safe.h
+sendmail.o: ../../include/sendopts.h
 sendmail.o: ../../include/set_ugid.h
 sendmail.o: ../../include/split_at.h
 sendmail.o: ../../include/stringops.h

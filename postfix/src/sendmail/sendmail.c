@@ -81,7 +81,7 @@
 /*	command above.
 /* .IP \fB-bl\fR
 /*	Go into daemon mode. To accept only local connections as
-/*	with Sendmail\'s \fB-bl\fR option, specify "\fBinet_interfaces
+/*	with Sendmail's \fB-bl\fR option, specify "\fBinet_interfaces
 /*	= loopback\fR" in the Postfix \fBmain.cf\fR configuration
 /*	file.
 /* .IP \fB-bm\fR
@@ -140,7 +140,7 @@
 /*	Initialize alias database. See the \fBnewaliases\fR
 /*	command above.
 /* .IP "\fB-i\fR"
-/*	When reading a message from standard input, don\'t treat a line
+/*	When reading a message from standard input, don't treat a line
 /*	with only a \fB.\fR character as the end of input.
 /* .IP "\fB-L \fIlabel\fR (ignored)"
 /*	The logging label. Use the \fBsyslog_name\fR configuration
@@ -158,19 +158,36 @@
 /*	This feature is available in Postfix 2.3 and later.
 /* .IP "\fB-n\fR (ignored)"
 /*	Backwards compatibility.
-/* .IP "\fB-oA\fIalias_database\fR"
-/*	Non-default alias database. Specify \fIpathname\fR or
-/*	\fItype\fR:\fIpathname\fR. See \fBpostalias\fR(1) for
-/*	details.
+/* .IP "\fB-O requiretls=yes\fR"
+/* .IP "\fB-O requiretls=no\fR"
+/*	When delivering a message to an SMTP or LMTP server, the
+/*	connection must use TLS with a verified server certificate,
+/*	and that server must support REQUIRETLS. The "requiretls" name
+/*	and option value are case-insensitive. REQUIRETLS enforcement
+/*	is controlled with the configuration parameters requiretls_enable,
+/*	smtp_requiretls_policy, and lmtp_requiretls_policy.
+/*
+/*	This feature is available in Postfix 3.11 and later.
+/* .IP "\fB-O smtputf8=yes\fR"
+/* .IP "\fB-O smtputf8=no\fR"
+/*	When delivering a message to an SMTP or LMTP server, and an
+/*	envelope address or message header contains UTF8 text, that server
+/*	must support SMTPUTF8. The "smtputf8" option name and value
+/*	are case-insensitive.
+/*
+/*	This feature is available in Postfix 3.11 and later.
 /* .IP "\fB-O \fIoption=value\fR (ignored)"
 /*	Set the named \fIoption\fR to \fIvalue\fR. Use the equivalent
 /*	configuration parameter in \fBmain.cf\fR instead.
+/* .IP "\fB-oA\fIalias_database\fR"
+/*	Non-default alias database. Specify \fIpathname\fR or
+/*	\fItype\fR:\fIpathname\fR. See \fBpostalias\fR(1) for details.
 /* .IP "\fB-o7\fR (ignored)"
 /* .IP "\fB-o8\fR (ignored)"
 /*	To send 8-bit or binary content, use an appropriate MIME encapsulation
 /*	and specify the appropriate \fB-B\fR command-line option.
 /* .IP "\fB-oi\fR"
-/*	When reading a message from standard input, don\'t treat a line
+/*	When reading a message from standard input, don't treat a line
 /*	with only a \fB.\fR character as the end of input.
 /* .IP "\fB-om\fR (ignored)"
 /*	The sender is never eliminated from alias etc. expansions.
@@ -403,7 +420,7 @@
 /*	The time after which the sender receives a copy of the message
 /*	headers of mail that is still queued.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBmail_owner (postfix)\fR"
@@ -412,9 +429,10 @@
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
 /*	The location of the Postfix top-level queue directory.
 /* .IP "\fBremote_header_rewrite_domain (empty)\fR"
-/*	Don't rewrite message headers from remote clients at all when
-/*	this parameter is empty; otherwise, rewrite message headers and
-/*	append the specified domain name to incomplete addresses.
+/*	Rewrite or add message headers in mail from remote clients if
+/*	the remote_header_rewrite_domain parameter value is non-empty,
+/*	updating incomplete addresses with the domain specified in the
+/*	remote_header_rewrite_domain parameter, and adding missing headers.
 /* .IP "\fBsyslog_facility (mail)\fR"
 /*	The syslog facility of Postfix logging.
 /* .IP "\fBsyslog_name (see 'postconf -d' output)\fR"
@@ -433,6 +451,11 @@
 /*	the Postfix executable files and documentation with the default
 /*	Postfix instance, and that are started, stopped, etc., together
 /*	with the default Postfix instance.
+/* .PP
+/*	Postfix 3.11 and later:
+/* .IP "\fBrequiretls_enable (yes)\fR"
+/*	Enable support for the ESMTP verb "REQUIRETLS" in the "MAIL
+/*	FROM" command.
 /* FILES
 /*	/var/spool/postfix, mail queue
 /*	/etc/postfix, configuration files
@@ -536,6 +559,7 @@
 #include <user_acl.h>
 #include <dsn_mask.h>
 #include <mail_parm_split.h>
+#include <sendopts.h>
 
 /* Application-specific. */
 
@@ -587,6 +611,11 @@ static const CONFIG_STR_TABLE str_table[] = {
     VAR_SM_FIX_EOL, DEF_SM_FIX_EOL, &var_sm_fix_eol, 1, 0,
     0,
 };
+
+ /*
+  * Sender options.
+  */
+static int sm_sendopts;
 
  /*
   * Silly little macros (SLMs).
@@ -694,6 +723,7 @@ static void enqueue(const int flags, const char *encoding,
     VSTRING *postdrop_command;
     uid_t   uid = getuid();
     int     status;
+    VSTRING *why;			/* postdrop status message */
     int     naddr;
     int     prev_type;
     MIME_STATE *mime_state = 0;
@@ -786,6 +816,14 @@ static void enqueue(const int flags, const char *encoding,
      * With "sendmail -N", instead of a per-message NOTIFY record we store one
      * per recipient so that we can simplify the implementation somewhat.
      */
+    if (sm_sendopts)
+	rec_fprintf(dst, REC_TYPE_SIZE, REC_TYPE_SIZE_FORMAT,
+		    (REC_TYPE_SIZE_CAST1) ~ 0,	/* message segment size */
+		    (REC_TYPE_SIZE_CAST2) ~ 0,	/* content offset */
+		    (REC_TYPE_SIZE_CAST3) ~ 0,	/* recipient count */
+		    (REC_TYPE_SIZE_CAST4) ~ 0,	/* qmgr options */
+		    (REC_TYPE_SIZE_CAST5) ~ 0,	/* content length */
+		    (REC_TYPE_SIZE_CAST6) sm_sendopts);
     if (dsn_envid)
 	rec_fprintf(dst, REC_TYPE_ATTR, "%s=%s",
 		    MAIL_ATTR_DSN_ENVID, dsn_envid);
@@ -987,11 +1025,15 @@ static void enqueue(const int flags, const char *encoding,
     if (vstream_ferror(VSTREAM_IN))
 	msg_fatal_status(EX_DATAERR, "%s(%ld): error reading input: %m",
 			 saved_sender, (long) uid);
-    if ((status = mail_stream_finish(handle, (VSTRING *) 0)) != 0)
+    why = vstring_alloc(100);
+    if ((status = mail_stream_finish(handle, why)) != CLEANUP_STAT_OK)
 	msg_fatal_status((status & CLEANUP_STAT_BAD) ? EX_SOFTWARE :
 			 (status & CLEANUP_STAT_WRITE) ? EX_TEMPFAIL :
+			 (status & CLEANUP_STAT_NOPERM) ? EX_NOPERM :
 			 EX_UNAVAILABLE, "%s(%ld): %s", saved_sender,
-			 (long) uid, cleanup_strerror(status));
+			 (long) uid, VSTRING_LEN(why) ?
+			 STR(why) : cleanup_strerror(status));
+    vstring_free(why);
 
     /*
      * Don't leave them in the dark.
@@ -1048,6 +1090,7 @@ int     main(int argc, char **argv)
     int     saved_optind;
     ARGV   *import_env;
     char   *alias_map_from_args = 0;
+    const char *oval;
 
     /*
      * Fingerprint executables and core dumps.
@@ -1245,7 +1288,40 @@ int     main(int argc, char **argv)
 	    break;
 	case 'N':
 	    if ((dsn_notify = dsn_notify_mask(optarg)) == 0)
-		msg_warn("bad -N option value -- ignored");
+		msg_warn("bad -N option value: '%s' -- ignored", optarg);
+	    break;
+	case 'O':
+	    if ((oval = optarg + strcspn(optarg, "="))[0] != 0)
+		oval += 1;
+	    if (strncasecmp(optarg, "REQUIRETLS=", oval - optarg) == 0) {
+		if (var_reqtls_enable == 0) {
+		    msg_warn("Ignoring option '-O %s, because the "
+			     "configuration is '%s = %s'", optarg,
+			     VAR_REQTLS_ENABLE, CONFIG_BOOL_NO);
+		    continue;
+		} else if (strcasecmp(oval, CONFIG_BOOL_YES) == 0) {
+		    sm_sendopts |= SOPT_REQUIRETLS_ESMTP;
+		    continue;
+		} else if (strcasecmp(oval, CONFIG_BOOL_NO) == 0) {
+		    sm_sendopts &= ~SOPT_REQUIRETLS_ESMTP;
+		    continue;
+		}
+		msg_warn("bad -O option: '%s' -- ignored", optarg);
+	    } else if (strncasecmp(optarg, "SMTPUTF8=", oval - optarg) == 0) {
+		if (var_smtputf8_enable == 0) {
+		    msg_warn("'-O %s' was requested, but the "
+			     "configuration is '%s = %s'", optarg,
+			     VAR_SMTPUTF8_ENABLE, CONFIG_BOOL_NO);
+		    continue;
+		} else if (strcasecmp(oval, CONFIG_BOOL_YES) == 0) {
+		    sm_sendopts |= SOPT_SMTPUTF8_REQUESTED;
+		    continue;
+		} else if (strcasecmp(oval, CONFIG_BOOL_NO) == 0) {
+		    sm_sendopts &= ~SOPT_SMTPUTF8_REQUESTED;
+		    continue;
+		}
+		msg_warn("bad -O option: '%s' -- ignored", optarg);
+	    }
 	    break;
 	case 'R':
 	    if ((dsn_ret = dsn_ret_code(optarg)) == 0)
@@ -1254,7 +1330,7 @@ int     main(int argc, char **argv)
 	case 'V':				/* DSN, was: VERP */
 	    if (strlen(optarg) > 100)
 		msg_warn("too long -V option value -- ignored");
-	    else if (!allprint(optarg))
+	    else if (!all_isprint_tab(optarg))
 		msg_warn("bad syntax in -V option value -- ignored");
 	    else
 		dsn_envid = optarg;

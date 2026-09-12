@@ -255,8 +255,8 @@ static int tls_scache_decode(TLS_SCACHE *cp, const char *cache_id,
 #define FREE_AND_RETURN(ptr, x) { vstring_free(ptr); return (x); }
 
     bin_data = vstring_alloc(hex_data_len / 2 + 1);
-    if (hex_decode_opt(bin_data, hex_data, hex_data_len,
-		       HEX_DECODE_FLAG_ALLOW_COLON) == 0) {
+    /* 202606 Qualys+Mythos: disallow ':', enforce hex_encode() format. */
+    if (hex_decode(bin_data, hex_data, hex_data_len) == 0) {
 	msg_warn("%s TLS cache: malformed entry for %s: %.100s",
 		 cp->cache_label, cache_id, hex_data);
 	FREE_AND_RETURN(bin_data, 0);
@@ -481,14 +481,9 @@ TLS_SCACHE *tls_scache_open(const char *dbname, const char *cache_label,
      * Open the dictionary with O_TRUNC, so that we never have to worry about
      * opening a damaged file after some process terminated abnormally.
      */
-#ifdef SINGLE_UPDATER
-#define DICT_FLAGS (DICT_FLAG_DUP_REPLACE | DICT_FLAG_OPEN_LOCK \
-		    | DICT_FLAG_UTF8_REQUEST)
-#else
 #define DICT_FLAGS \
-	(DICT_FLAG_DUP_REPLACE | DICT_FLAG_LOCK | DICT_FLAG_SYNC_UPDATE \
+	(DICT_FLAG_DUP_REPLACE | DICT_FLAG_OPEN_LOCK | DICT_FLAG_SYNC_UPDATE \
 	 | DICT_FLAG_UTF8_REQUEST)
-#endif
 
     dict = dict_open(dbname, O_RDWR | O_CREAT | O_TRUNC, DICT_FLAGS);
 

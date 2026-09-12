@@ -107,6 +107,8 @@ void    cleanup_extracted_process(CLEANUP_STATE *state, int type,
     char   *attr_value;
     const char *error_text;
     int     extra_opts;
+    int     mapped_type = type;
+    const char *mapped_buf = buf;
     int     junk;
 
 #ifdef DELAY_ACTION
@@ -168,9 +170,10 @@ void    cleanup_extracted_process(CLEANUP_STATE *state, int type,
 		     state->queue_id, attr_name);
 	    return;
 	}
+	/* 202606 Qualys+Mythos: don't clobber 'type' and 'buf'. */
 	if ((junk = rec_attr_map(attr_name)) != 0) {
-	    buf = attr_value;
-	    type = junk;
+	    mapped_buf = attr_value;
+	    mapped_type = junk;
 	}
     }
 
@@ -184,6 +187,10 @@ void    cleanup_extracted_process(CLEANUP_STATE *state, int type,
 	    cleanup_out_string(state, REC_TYPE_FILT, state->filter);
 	if (state->redirect != 0)
 	    cleanup_out_string(state, REC_TYPE_RDR, state->redirect);
+	if (state->message_id != 0) {
+	    cleanup_out_format(state, REC_TYPE_ATTR, "%s=%s",
+			       MAIL_ATTR_MESSAGE_ID, state->message_id);
+	}
 	if ((encoding = nvtable_find(state->attr, MAIL_ATTR_ENCODING)) != 0)
 	    cleanup_out_format(state, REC_TYPE_ATTR, "%s=%s",
 			       MAIL_ATTR_ENCODING, encoding);
@@ -236,24 +243,25 @@ void    cleanup_extracted_process(CLEANUP_STATE *state, int type,
 	state->dsn_notify = 0;
 	return;
     }
-    if (type == REC_TYPE_DSN_ORCPT) {
+    if (mapped_type == REC_TYPE_DSN_ORCPT) {
 	if (state->dsn_orcpt) {
 	    msg_warn("%s: ignoring out-of-order DSN original recipient record <%.200s>",
 		     state->queue_id, state->dsn_orcpt);
 	    myfree(state->dsn_orcpt);
 	}
-	state->dsn_orcpt = mystrdup(buf);
+	state->dsn_orcpt = mystrdup(mapped_buf);
 	return;
     }
-    if (type == REC_TYPE_DSN_NOTIFY) {
+    if (mapped_type == REC_TYPE_DSN_NOTIFY) {
 	if (state->dsn_notify) {
 	    msg_warn("%s: ignoring out-of-order DSN notify record <%d>",
 		     state->queue_id, state->dsn_notify);
 	    state->dsn_notify = 0;
 	}
-	if (!alldig(buf) || (junk = atoi(buf)) == 0 || DSN_NOTIFY_OK(junk) == 0)
+	if (!alldig(mapped_buf) || (junk = atoi(mapped_buf)) == 0
+	    || DSN_NOTIFY_OK(junk) == 0)
 	    msg_warn("%s: ignoring malformed dsn notify record <%.200s>",
-		     state->queue_id, buf);
+		     state->queue_id, mapped_buf);
 	else
 	    state->qmgr_opts |=
 		QMGR_READ_FLAG_FROM_DSN(state->dsn_notify = junk);
@@ -307,8 +315,8 @@ void    cleanup_extracted_finish(CLEANUP_STATE *state)
 	cleanup_addr_bcc(state, var_always_bcc);
 
     /*
-     * Flush non-Milter header/body_checks BCC recipients. Clear hbc_rcpt
-     * so that it can be used for other purposes.
+     * Flush non-Milter header/body_checks BCC recipients. Clear hbc_rcpt so
+     * that it can be used for other purposes.
      */
     if (state->hbc_rcpt) {
 	if (CLEANUP_OUT_OK(state) && state->recip != 0) {

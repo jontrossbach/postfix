@@ -51,6 +51,10 @@
 /*
 /*	BINHASH_INFO **binhash_list(table)
 /*	BINHASH	*table;
+/*
+/*	BINHASH_INFO *binhash_sequence(table, how)
+/*	BINHASH	*table;
+/*	int	how;
 /* DESCRIPTION
 /*	This module maintains one or more hash tables. Each table entry
 /*	consists of a unique binary-valued lookup key and a generic
@@ -91,6 +95,12 @@
 /*	binhash_list() returns a null-terminated list of pointers to
 /*	all elements in the named table. The list should be passed to
 /*	myfree().
+/*
+/*	binhash_sequence() returns the first or next element
+/*	depending on the value of the "how" argument. Specify
+/*	BINHASH_SEQ_FIRST to start a new sequence, BINHASH_SEQ_NEXT
+/*	to continue, and BINHASH_SEQ_STOP to terminate a sequence
+/*	early.
 /* RESTRICTIONS
 /*	A callback function should not modify the hash table that is
 /*	specified to its caller.
@@ -100,6 +110,7 @@
 /*	to delete a non-existent entry.
 /* SEE ALSO
 /*	mymalloc(3) memory management wrapper
+/*	hash_fnv(3) Fowler/Noll/Vo hash function
 /* LICENSE
 /* .ad
 /* .fi
@@ -109,6 +120,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* C library */
@@ -123,6 +139,13 @@
 #include "binhash.h"
 
 /* binhash_hash - hash a string */
+
+#ifndef NO_HASH_FNV
+#include "hash_fnv.h"
+
+#define binhash_hash(key, len, size) (hash_fnv((key), (len)) % (size))
+
+#else
 
 static size_t binhash_hash(const void *key, ssize_t len, size_t size)
 {
@@ -142,6 +165,8 @@ static size_t binhash_hash(const void *key, ssize_t len, size_t size)
     }
     return (h % size);
 }
+
+#endif
 
 /* binhash_link - insert element into table */
 
@@ -178,6 +203,7 @@ BINHASH *binhash_create(ssize_t size)
 
     table = (BINHASH *) mymalloc(sizeof(BINHASH));
     binhash_size(table, size < 13 ? 13 : size);
+    table->seq_bucket = table->seq_element = 0;
     return (table);
 }
 
@@ -251,7 +277,7 @@ BINHASH_INFO *binhash_locate(BINHASH *table, const void *key, ssize_t key_len)
 void    binhash_delete(BINHASH *table, const void *key, ssize_t key_len, void (*free_fn) (void *))
 {
     if (table != 0) {
-	BINHASH_INFO *ht;
+	BINHASH_INFO *ht, **sp;
 	BINHASH_INFO **h = table->data + binhash_hash(key, key_len, table->size);
 
 	for (ht = *h; ht; ht = ht->next) {
@@ -264,13 +290,23 @@ void    binhash_delete(BINHASH *table, const void *key, ssize_t key_len, void (*
 		    *h = ht->next;
 		table->used--;
 		myfree(ht->key);
-		if (free_fn)
+		if (free_fn && ht->value)
 		    (*free_fn) (ht->value);
 		myfree((void *) ht);
+		/* In case the first/next iterator has not yet visited it */
+		for (sp = table->seq_element; sp && *sp; sp++) {
+		    if (*sp == ht) {
+			while ((*sp = sp[1]) != 0)
+			    sp += 1;
+			break;
+		    }
+		}
 		return;
 	    }
 	}
-	msg_panic("binhash_delete: unknown_key: \"%s\"", (char *) key);
+	/* 202606 Qualys+Mythos: key is not null-terminated. */
+	msg_panic("binhash_delete: unknown_key: \"%.*s\"",
+		  (int) key_len, (char *) key);
     }
 }
 
@@ -288,13 +324,16 @@ void    binhash_free(BINHASH *table, void (*free_fn) (void *))
 	    for (ht = *h++; ht; ht = next) {
 		next = ht->next;
 		myfree(ht->key);
-		if (free_fn)
+		if (free_fn && ht->value)
 		    (*free_fn) (ht->value);
 		myfree((void *) ht);
 	    }
 	}
 	myfree((void *) table->data);
 	table->data = 0;
+	if (table->seq_bucket)
+	    myfree((void *) table->seq_bucket);
+	table->seq_bucket = 0;
 	myfree((void *) table);
     }
 }
@@ -316,8 +355,7 @@ void    binhash_walk(BINHASH *table, void (*action) (BINHASH_INFO *, void *),
 
 /* binhash_list - list all table members */
 
-BINHASH_INFO **binhash_list(table)
-BINHASH *table;
+BINHASH_INFO **binhash_list(BINHASH *table)
 {
     BINHASH_INFO **list;
     BINHASH_INFO *member;
@@ -335,3 +373,95 @@ BINHASH *table;
     list[count] = 0;
     return (list);
 }
+
+/* binhash_sequence - dict(3) compatibility iterator */
+
+BINHASH_INFO *binhash_sequence(BINHASH *table, int how)
+{
+    if (table == 0)
+	return (0);
+
+    switch (how) {
+    case BINHASH_SEQ_FIRST:			/* start new sequence */
+	if (table->seq_bucket)
+	    myfree((void *) table->seq_bucket);
+	table->seq_bucket = binhash_list(table);
+	table->seq_element = table->seq_bucket;
+	/* FALLTHROUGH */
+    case BINHASH_SEQ_NEXT:			/* next element */
+	if (table->seq_element && *table->seq_element)
+	    return (*(table->seq_element)++);
+	/* FALLTHROUGH */
+    default:					/* terminate sequence */
+	if (table->seq_bucket) {
+	    myfree((void *) table->seq_bucket);
+	    table->seq_bucket = table->seq_element = 0;
+	}
+	return (0);
+    }
+}
+
+#ifdef TEST
+#include <vstring_vstream.h>
+#include <myrand.h>
+
+int     main(int unused_argc, char **unused_argv)
+{
+    VSTRING *buf = vstring_alloc(10);
+    ssize_t count = 0;
+    BINHASH *hash;
+    BINHASH_INFO **ht_info;
+    BINHASH_INFO **ht;
+    BINHASH_INFO *info;
+    ssize_t i;
+    ssize_t r;
+    int     op;
+
+    /*
+     * Load a large number of strings including terminator, and delete them
+     * in a random order.
+     */
+    hash = binhash_create(10);
+    while (vstring_get(buf, VSTREAM_IN) != VSTREAM_EOF)
+	binhash_enter(hash, vstring_str(buf), VSTRING_LEN(buf) + 1,
+		      CAST_INT_TO_VOID_PTR(count++));
+    if (count != hash->used)
+	msg_panic("%ld entries stored, but %lu entries exist",
+		  (long) count, (unsigned long) hash->used);
+    for (i = 0, op = BINHASH_SEQ_FIRST; (info = binhash_sequence(hash, op)) != 0;
+	 i++, op = BINHASH_SEQ_NEXT)
+	if (memchr(info->key, 0, info->key_len) == 0)
+	    msg_panic("no null byte in lookup key");
+    if (i != hash->used)
+	msg_panic("%ld entries found, but %lu entries exist",
+		  (long) i, (unsigned long) hash->used);
+    ht_info = binhash_list(hash);
+    for (i = 0; i < hash->used; i++) {
+	r = myrand() % hash->used;
+	info = ht_info[i];
+	ht_info[i] = ht_info[r];
+	ht_info[r] = info;
+    }
+    for (ht = ht_info; *ht; ht++)
+	binhash_delete(hash, ht[0]->key, ht[0]->key_len, (void (*) (void *)) 0);
+    if (hash->used > 0)
+	msg_panic("%ld entries not deleted", (long) hash->used);
+    myfree((void *) ht_info);
+    binhash_free(hash, (void (*) (void *)) 0);
+
+    /* Iterate one-element table. */
+    hash = binhash_create(10);
+	binhash_enter(hash, "one", 4, "one");
+    if( binhash_sequence(hash,BINHASH_SEQ_FIRST) == 0)
+	msg_panic("one-element iterator BINHASH_SEQ_FIRST");
+    if (binhash_sequence(hash,BINHASH_SEQ_NEXT) != 0)
+	msg_panic("one-element iterator	BINHASH_SEQ_NEXT");
+    binhash_free(hash, (void (*) (void *)) 0);
+
+    /* TODO: Delete element before it is visited by iterator. */
+
+    vstring_free(buf);
+    return (0);
+}
+
+#endif

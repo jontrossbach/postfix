@@ -1,82 +1,82 @@
-This is the Postfix 3.6 (experimental) release.
+This is the Postfix 3.12 snapshot release.
 
-The stable Postfix release is called postfix-3.5.x where 3=major
-release number, 5=minor release number, x=patchlevel.  The stable
+The stable Postfix release is called postfix-3.11.x where 3=major
+release number, 11=minor release number, x=patchlevel. The stable
 release never changes except for patches that address bugs or
 emergencies. Patches change the patchlevel and the release date.
 
 New features are developed in snapshot releases. These are called
-postfix-3.6-yyyymmdd where yyyymmdd is the release date (yyyy=year,
-mm=month, dd=day).  Patches are never issued for snapshot releases;
+postfix-3.12-yyyymmdd where yyyymmdd is the release date (yyyy=year,
+mm=month, dd=day). Patches are never issued for snapshot releases;
 instead, a new snapshot is released.
 
 The mail_release_date configuration parameter (format: yyyymmdd)
 specifies the release date of a stable release or snapshot release.
 
-If you upgrade from Postfix 3.4 or earlier, read RELEASE_NOTES-3.5
+If you upgrade from Postfix 3.10 or earlier, please read RELEASE_NOTES-3.11
 before proceeding.
 
-License change
----------------
+Dual license
+------------
 
-This software is distributed with a dual license: in addition to the
-historical IBM Public License 1.0, it is now also distributed with the
-more recent Eclipse Public License 2.0. Recipients can choose to take
-the software under the license of their choice. Those who are more
-comfortable with the IPL can continue with that license.
+As of Postfix 3.2.5 this software is distributed with a dual license:
+in addition to the historical IBM Public License (IPL) 1.0, it is
+now also distributed with the more recent Eclipse Public License
+(EPL) 2.0. Recipients can choose to take the software under the
+license of their choice. Those who are more comfortable with the
+IPL can continue with that license.
 
-Incompatible change with snapshot 20200705
-==========================================
-
-The minimum OpenSSL version is 1.1.1, which will reach the end
-of life by 20203-09-11. 
-
-The default digest has changed from md5 to sha256 (Postfix 3.6 with
-compatibility_level >= 3). With a lower compatibility_level setting,
-Postfix defaults to using md5, and logs a warning when a Postfix
-configuration specifies no explicit digest type.
-
-Export-grade Diffie-Hellman key exchange is no longer supported,
-and the tlsproxy_tls_dh512_param_file parameter is ignored,
-
-Incompatible change with snapshot 20200531
-==========================================
-
-Postfix delivery agents now log an explicit record when delegating
-delivery to a different Postfix delivery agent. 
-
-For example, with "best_mx_transport = local", an SMTP delivery
-agent will now log when a recipient will be delivered locally. This
-makes the delegating delivery agent visible, where it would otherwise
-have remained invisible, which would complicate troubleshooting.
-
-  postfix/smtp[pid]: queueid: passing <recipient> to transport=local
-
-This will usually be followed by logging for an actual delivery:
-
-  postfix/local[pid]: queueid: to=<recipient>, relay=local, ...
-
-Other examples: the local delivery agent defers mailbox delivery
-through mailbox_transport or through fallback_transport.
-
-Major changes with snapshot 20200509
+Major changes with snapshot 20260514
 ====================================
 
-The threadsafe resolver API (res_nxxx() calls) is now the default,
-not because the API is threadsafe, but because new features are
-being added there.
+Support for per-session TLS traces with detailed TLS protocol
+information but without any plaintext SMTP content. This feature
+can be enabled by appending ",trace" to a TLS loglevel.
 
-To build old style, build with:
+Postfix daemons will record one trace per TLS session under
+$queue_directory/tlstrace. A trace file name is the concatenation
+of the application name ("smtpd", "smtp", etc.), a time stamp
+formatted as yyyymmddhhmmss, the microsecond portion of system time,
+the peer IP address, and a six-character unique string to avoid
+file name collisions.
 
-    make makefiles CCARGS="-DNO_RES_NCALLS..."
+Safety measures: the size of each trace file is limited with {lmtp,
+postscreen, smtp_, smtpd}_tls_trace_size_limit (default: 102400),
+and all Postfix daemons combined will create no more than
+tls_trace_rate_limit trace files (default: 1) per anvil_rate_time_unit
+interval (default: 60s).
 
-This is also the default for systems that are known not to support
-the threadsafe resolver API, such systems that use libc-musl.
+The posttls-finger command will create trace files (using the same
+name format as daemons) in the current directory, for example:
+"posttls-finger -L 1,trace example.com". It is not subject to the
+tls_trace_rate_limit or trace file size constraints.
 
-Incompatible changes with snapshot 20200416
+This feature is based on a design by Wietse and Viktor, initially
+implemented by Claude Code, then simplified and completed by Wietse
+and Viktor.
+
+Incompatible changes with snapshot 20260514
 ===========================================
 
-Security: this release disables DANE support on Linux systems with
-libc-musl, because libc-musl provides no indication whether DNS
-responses are authentic. This broke DANE support without a clear
-explanation.
+The internal protocol between tlsproxy(8) and its clients (smtp(8),
+postscreen(8), smtpd(8) in tlsproxy mode, and "posttls-finger -X")
+gained a new attribute. Run "postfix reload" after the upgrade. If
+this step is skipped, TLS sessions through tlsproxy(8) will fail,
+because the old and new processes disagree on the protocol shape.
+
+Incompatible changes with snapshot 20260312
+===========================================
+
+For consistency with postmap, the postalias command now stores the
+alias database search key in external (quoted) form. For example,
+if an alias name contains whitespace between the words 'foo' and
+'bar', then it will be stored as "foo bar" including the double
+quotes.
+
+For consistency with "postmap -s", the "postalias -s" command now
+outputs the search key in external (quoted) form.
+
+For backwards compatibility, the local(8) delivery agent will look
+up the legacy internal (unquoted) form of an alias name only if the
+preferred external (quoted) form is not found, and the internal and
+external forms differ.

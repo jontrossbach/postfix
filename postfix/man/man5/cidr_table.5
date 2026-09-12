@@ -15,7 +15,9 @@ format of Postfix CIDR tables
 .ad
 .fi
 The Postfix mail system uses optional lookup tables.
-These tables are usually in \fBdbm\fR or \fBdb\fR format.
+These tables are usually in \fBlmdb:\fR, \fBcdb:\fR, \fBhash:\fR,
+or \fBdbm:\fR format.
+
 Alternatively, lookup tables can be specified in CIDR
 (Classless Inter\-Domain Routing) form. In this case, each
 input is compared against a list of patterns. When a match
@@ -110,6 +112,40 @@ an IPv4 address octet indicates octal notation).
 
 Note: address information may be enclosed inside "[]" but
 this form is not required.
+.SH "INLINE SPECIFICATION"
+.na
+.nf
+.ad
+.fi
+The contents of a table may be specified in the table name
+(Postfix 3.7 and later).
+The basic syntax is:
+
+.nf
+main.cf:
+    \fIparameter\fR \fB= .. cidr:{ { \fIrule\-1\fB }, { \fIrule\-2\fB } .. } ..\fR
+
+master.cf:
+    \fB.. \-o { \fIparameter\fR \fB= .. cidr:{ { \fIrule\-1\fB }, { \fIrule\-2\fB } .. } .. } ..\fR
+.fi
+
+Postfix recursively expands any \fI$parametername\fR instances
+in the above parameter value, ignores whitespace after '{'
+and before '}', and writes each \fIrule\fR as one text line to
+an in\-memory file:
+
+.nf
+in\-memory file:
+    rule\-1
+    rule\-2
+    ..
+.fi
+
+Postfix parses the result as if it is a file in /etc/postfix.
+
+Note: if a rule contains \fB$\fR, specify \fB$$\fR to keep
+Postfix from trying to do \fI$name\fR expansion as it
+evaluates a parameter value.
 .SH "EXAMPLE SMTPD ACCESS MAP"
 .na
 .nf
@@ -118,8 +154,8 @@ this form is not required.
     smtpd_client_restrictions = ... cidr:/etc/postfix/client.cidr ...
 
 /etc/postfix/client.cidr:
-    # Rule order matters. Put more specific whitelist entries
-    # before more general blacklist entries.
+    # Rule order matters. Put more specific allowlist entries
+    # before more general denylist entries.
     192.168.1.1             OK
     192.168.0.0/16          REJECT
     2001:db8::1             OK

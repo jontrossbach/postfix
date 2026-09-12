@@ -16,6 +16,7 @@
 /*		long	data_size;
 /*		char	*nexthop;
 /*		char	*encoding;
+/*		int	sendopts;
 /*		char	*sender;
 /*		MSG_STATS msg_stats;
 /*		RECIPIENT_LIST rcpt_list;
@@ -71,7 +72,7 @@
 /*
 /*	The \fIhop_status\fR member must be updated by the caller
 /*	when all delivery to the destination in \fInexthop\fR should
-/*	be deferred. This member is passed to to dsn_free().
+/*	be deferred. This member is passed to dsn_free().
 /*
 /*	deliver_request_done() reports the delivery status back to the
 /*	client, including the optional \fIhop_status\fR etc. information,
@@ -92,6 +93,14 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -135,13 +144,13 @@ static int deliver_request_initial(VSTREAM *stream)
      * delivery request; otherwise the queue manager could block in write().
      */
     if (msg_verbose)
-	msg_info("deliver_request_initial: send initial status");
+	msg_info("deliver_request_initial: send initial response");
     attr_print(stream, ATTR_FLAG_NONE,
-	       SEND_ATTR_INT(MAIL_ATTR_STATUS, 0),
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_DELIVER),
 	       ATTR_TYPE_END);
     if ((err = vstream_fflush(stream)) != 0)
 	if (msg_verbose)
-	    msg_warn("send initial status: %m");
+	    msg_warn("send initial response: %m");
     return (err);
 }
 
@@ -165,7 +174,7 @@ static int deliver_request_final(VSTREAM *stream, DELIVER_REQUEST *request,
 	msg_info("deliver_request_final: send: \"%s\" %d",
 		 hop_status->reason, status);
     attr_print(stream, ATTR_FLAG_NONE,
-	       SEND_ATTR_FUNC(dsn_print, (void *) hop_status),
+	       SEND_ATTR_FUNC(dsn_print, (const void *) hop_status),
 	       SEND_ATTR_INT(MAIL_ATTR_STATUS, status),
 	       ATTR_TYPE_END);
     if ((err = vstream_fflush(stream)) != 0)
@@ -208,7 +217,7 @@ static int deliver_request_get(VSTREAM *stream, DELIVER_REQUEST *request)
     static VSTRING *dsn_envid;
     static RCPT_BUF *rcpt_buf;
     int     rcpt_count;
-    int     smtputf8;
+    int     sendopts;
     int     dsn_ret;
 
     /*
@@ -248,7 +257,7 @@ static int deliver_request_get(VSTREAM *stream, DELIVER_REQUEST *request)
 		  RECV_ATTR_LONG(MAIL_ATTR_SIZE, &request->data_size),
 		  RECV_ATTR_STR(MAIL_ATTR_NEXTHOP, nexthop),
 		  RECV_ATTR_STR(MAIL_ATTR_ENCODING, encoding),
-		  RECV_ATTR_INT(MAIL_ATTR_SMTPUTF8, &smtputf8),
+		  RECV_ATTR_INT(MAIL_ATTR_SENDOPTS, &sendopts),
 		  RECV_ATTR_STR(MAIL_ATTR_SENDER, address),
 		  RECV_ATTR_STR(MAIL_ATTR_DSN_ENVID, dsn_envid),
 		  RECV_ATTR_INT(MAIL_ATTR_DSN_RET, &dsn_ret),
@@ -283,8 +292,8 @@ static int deliver_request_get(VSTREAM *stream, DELIVER_REQUEST *request)
     request->queue_id = mystrdup(vstring_str(queue_id));
     request->nexthop = mystrdup(vstring_str(nexthop));
     request->encoding = mystrdup(vstring_str(encoding));
-    /* Fix 20140708: dedicated smtputf8 attribute with its own flags. */
-    request->smtputf8 = smtputf8;
+    /* Fix 20140708: dedicated attribute for SMTPUTF8 etc. flags. */
+    request->sendopts = sendopts;
     request->sender = mystrdup(vstring_str(address));
     request->client_name = mystrdup(vstring_str(client_name));
     request->client_addr = mystrdup(vstring_str(client_addr));

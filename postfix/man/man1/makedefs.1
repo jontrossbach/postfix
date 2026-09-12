@@ -38,6 +38,7 @@ of the make(1) command.
 Specifies one or more non\-default object libraries. Postfix
 3.0 and later specify some of their database library
 dependencies with AUXLIBS_CDB, AUXLIBS_LDAP, AUXLIBS_LMDB,
+AUXLIBS_MONGODB,
 AUXLIBS_MYSQL, AUXLIBS_PCRE, AUXLIBS_PGSQL, AUXLIBS_SDBM,
 and AUXLIBS_SQLITE, respectively.
 .IP \fBCC=\fIcompiler_command\fR
@@ -48,6 +49,8 @@ Specifies non\-default compiler arguments, for example, a non\-default
 \fIinclude\fR directory.
 The following directives are special:
 .RS
+.IP \fB\-DNO_CLOSEFROM\fR
+Do not use the system closefom() implementation.
 .IP \fB\-DNO_DB\fR
 Do not build with Berkeley DB support.
 .IP \fB\-DNO_DEVPOLL\fR
@@ -63,7 +66,8 @@ By default, EPOLL support is compiled in on platforms that
 are known to support it.
 .IP \fB\-DNO_EAI\fR
 Do not build with EAI (SMTPUTF8) support. By default, EAI
-support is compiled in when the "pkg\-config" command is
+support is compiled in when the "pkgconf" or "pkg\-config"
+command are
 found, or the deprecated "icu\-config" command.
 .IP \fB\-DNO_INLINE\fR
 Do not require support for C99 "inline" functions. Instead,
@@ -93,8 +97,8 @@ Do not build with NISPLUS support. Support for NISPLUS
 is unavailable on some recent Solaris distributions.
 .IP \fB\-DNO_PCRE\fR
 Do not build with PCRE support.
-By default, PCRE support is compiled in when the \fBpcre\-config\fR
-utility is installed.
+By default, PCRE support is compiled in when the \fBpcre2\-config\fR
+or \fBpcre\-config\fR utility are installed.
 .IP \fB\-DNO_POSIX_GETPW_R\fR
 Disable support for POSIX getpwnam_r/getpwuid_r.
 .IP \fB\-DNO_RES_NCALLS\fR
@@ -106,6 +110,10 @@ appear to work.
 .IP \fB\-DNO_SNPRINTF\fR
 Use sprintf() instead of snprintf(). By default, Postfix
 uses snprintf() except on ancient systems.
+.IP \fB\-DNO_STDBOOL\fR
+Don't use <stdbool.h>. This is usually auto\-detected.
+.IP \fB\-DNO_TLS_TRACE\fR
+Build without OpenSSL 3 (and later) debug trace support.
 .RE
 .IP \fBDEBUG=\fIdebug_level\fR
 Specifies a non\-default debugging level. The default is \fB\-g\fR.
@@ -159,10 +167,10 @@ installation parameter(s). The following parameters are
 supported in this context:
 
 command_directory config_directory daemon_directory
-data_directory default_database_type html_directory
-mail_spool_directory mailq_path manpage_directory meta_directory
-newaliases_path queue_directory readme_directory sendmail_path
-shlib_directory openssl_path
+data_directory default_cache_db_type default_database_type
+html_directory mail_spool_directory mailq_path manpage_directory
+meta_directory newaliases_path queue_directory readme_directory
+sendmail_path shlib_directory openssl_path
 
 See the postconf(5) manpage for a description of these
 parameters.

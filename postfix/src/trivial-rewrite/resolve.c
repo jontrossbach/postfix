@@ -87,6 +87,7 @@
 #include <maps.h>
 #include <mail_addr_find.h>
 #include <valid_mailhost_addr.h>
+#include <dsn_util.h>
 
 /* Application-specific. */
 
@@ -222,7 +223,7 @@ static void resolve_addr(RES_CONTEXT *rp, char *sender, char *addr,
      * This suggests that we parse the address in internalized (unquoted) form.
      * Unfortunately, if we do that, the unparser generates incorrect white
      * space between adjacent non-operator tokens. Example: ``first last''
-     * needs white space, but ``stuff[stuff]'' does not. This is is not a
+     * needs white space, but ``stuff[stuff]'' does not. This is not a
      * problem when unparsing the result from parsing externalized forms,
      * because the parser/unparser were designed for valid externalized forms
      * where ``stuff[stuff]'' does not happen.
@@ -427,7 +428,7 @@ static void resolve_addr(RES_CONTEXT *rp, char *sender, char *addr,
 	if (!valid_mailhost_literal(rcpt_domain, DONT_GRIPE))
 	    *flags |= RESOLVE_FLAG_ERROR;
     } else if (var_smtputf8_enable
-	       && valid_utf8_string(STR(nextrcpt), LEN(nextrcpt)) == 0) {
+	       && valid_utf8_stringz(STR(nextrcpt)) == 0) {
 	*flags |= RESOLVE_FLAG_ERROR;
     } else if (!valid_utf8_hostname(var_smtputf8_enable, rcpt_domain,
 				    DONT_GRIPE)) {
@@ -715,13 +716,23 @@ static void resolve_addr(RES_CONTEXT *rp, char *sender, char *addr,
 #define IGNORE_ADDR_EXTENSION   ((char **) 0)
 
     if (relocated_maps != 0) {
-	const char *newloc;
+	const char *reply;
+	DSN_SPLIT dp;
 
-	if ((newloc = mail_addr_find(relocated_maps, STR(nextrcpt),
-				     IGNORE_ADDR_EXTENSION)) != 0) {
+	if ((reply = mail_addr_find(relocated_maps, STR(nextrcpt),
+				    IGNORE_ADDR_EXTENSION)) != 0) {
 	    vstring_strcpy(channel, MAIL_SERVICE_ERROR);
-	    /* 5.1.6 is the closest match, but not perfect. */
-	    vstring_sprintf(nexthop, "5.1.6 User has moved to %s", newloc);
+	    if (var_enb_relocated_pfx) {
+		/* 5.1.6 is the closest match, but not perfect. */
+		vstring_sprintf(nexthop, "5.1.6 User has moved to %s", reply);
+	    } else if (!dsn_valid(reply)
+		       || dsn_split(&dp, "5.2.0", reply)->text[0] == 0) {
+		msg_warn("%s result must contain RFC 3463 status and text: '%.100s'",
+			 VAR_RELOCATED_MAPS, reply);
+		vstring_sprintf(nexthop, "5.2.0 Mailbox is unavailable");
+	    } else {
+		vstring_sprintf(nexthop, "%s %s", DSN_STATUS(dp.dsn), dp.text);
+	    }
 	} else if (relocated_maps->error != 0) {
 	    msg_warn("%s lookup failure", VAR_RELOCATED_MAPS);
 	    *flags |= RESOLVE_FLAG_FAIL;

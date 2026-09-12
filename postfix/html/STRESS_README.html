@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix Stress-Dependent Configuration</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -110,7 +111,7 @@ Oct  3 20:39:27 spike postfix/master[28905]: warning: to avoid this
  condition, increase the process count in <a href="master.5.html">master.cf</a> or reduce the
  service time per client
 Oct  3 20:39:27 spike postfix/master[28905]: warning: see
-  <a href="http://www.postfix.org/STRESS_README.html">http://www.postfix.org/STRESS_README.html</a> for examples of
+  <a href="https://www.postfix.org/STRESS_README.html">https://www.postfix.org/STRESS_README.html</a> for examples of
   stress-adapting configuration settings
 </pre>
 
@@ -354,7 +355,7 @@ such as SMTP access maps.  The Postfix SMTP server will reject mail
 and disconnect without waiting for the remote SMTP client to send
 a QUIT command.  </p>
 
-<li> <p> To hang up connections from blacklisted zombies, you can
+<li> <p> To hang up connections from denylisted zombies, you can
 set specific Postfix SMTP server reject codes for specific RBLs,
 and for individual responses from specific RBLs. We'll use
 zen.spamhaus.org as an example; by the time you read this document,
@@ -400,7 +401,7 @@ described below.  </p>
 <li> <p> You can automatically turn on the above overload measure
 with Postfix 2.5 and later, or with earlier releases that contain
 the stress-adaptive behavior source code patch from the mirrors
-listed at <a href="http://www.postfix.org/download.html">http://www.postfix.org/download.html</a>. Simply replace line
+listed at <a href="https://www.postfix.org/download.html">https://www.postfix.org/download.html</a>. Simply replace line
 above 8 with: </p>
 
 <pre>
@@ -418,7 +419,7 @@ in section "<a href="#adapt">Automatic stress-adaptive behavior</a>".
 <p> See the section "<a href="#adapt">Automatic stress-adaptive
 behavior</a>" if you are running Postfix version 2.5 or later, or
 if you have applied the source code patch for stress-adaptive
-behavior from the mirrors listed at <a href="http://www.postfix.org/download.html">http://www.postfix.org/download.html</a>.
+behavior from the mirrors listed at <a href="https://www.postfix.org/download.html">https://www.postfix.org/download.html</a>.
 </p>
 
 <p> The following measures can be applied temporarily during overload.
@@ -543,7 +544,7 @@ services that accept remote connections. </p>
 <p> The <a href="postscreen.8.html">postscreen(8)</a> daemon, introduced with Postfix 2.8, provides
 additional protection against mail server overload. One <a href="postscreen.8.html">postscreen(8)</a>
 process handles multiple inbound SMTP connections, and decides which
-clients may to talk to a Postfix SMTP server process.  By keeping
+clients may talk to a Postfix SMTP server process.  By keeping
 spambots away, <a href="postscreen.8.html">postscreen(8)</a> leaves more SMTP server processes
 available for legitimate clients, and delays the onset of server
 overload conditions. </p>

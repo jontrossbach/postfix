@@ -51,12 +51,13 @@ INT, QUIT or TERM signal, the queue file is deleted.
 .fi
 .IP MAIL_CONFIG
 Directory with the \fBmain.cf\fR file. In order to avoid exploitation
-of set\-group ID privileges, a non\-standard directory is allowed only
+of set\-group ID privileges, a non\-default directory is allowed only
 if:
 .RS
 .IP \(bu
-The name is listed in the standard \fBmain.cf\fR file with the
-\fBalternate_config_directories\fR configuration parameter.
+The name is listed in the default \fBmain.cf\fR file with the
+\fBalternate_config_directories\fR or
+\fBmulti_instance_directories\fR configuration parameter.
 .IP \(bu
 The command is invoked by the super\-user.
 .RE
@@ -78,7 +79,7 @@ environment parameter.
 The default location of the Postfix main.cf and master.cf
 configuration files.
 .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-The list of environment parameters that a privileged Postfix
+The list of environment variables that a privileged Postfix
 process will import from a non\-Postfix parent process, or name=value
 environment overrides.
 .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
@@ -96,6 +97,18 @@ Available in Postfix version 2.2 and later:
 .IP "\fBauthorized_submit_users (static:anyone)\fR"
 List of users who are authorized to submit mail with the \fBsendmail\fR(1)
 command (and with the privileged \fBpostdrop\fR(1) helper command).
+.PP
+Available in Postfix version 3.6 and later:
+.IP "\fBlocal_login_sender_maps (static:*)\fR"
+A list of lookup tables that are searched by the UNIX login name,
+and that return a list of allowed envelope sender patterns separated
+by space or comma.
+.IP "\fBempty_address_local_login_sender_maps_lookup_key (<>)\fR"
+The lookup key to be used in local_login_sender_maps tables, instead
+of the null sender address.
+.IP "\fBrecipient_delimiter (empty)\fR"
+The set of characters that can separate an email address
+localpart, user name, or a .forward file name from its extension.
 .SH "FILES"
 .na
 .nf

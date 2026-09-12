@@ -57,7 +57,7 @@
 /*	Preliminary SMTPUTF8 support is introduced with Postfix 3.0.
 /* .IP "\fBsmtputf8_enable (yes)\fR"
 /*	Enable preliminary SMTPUTF8 support for the protocols described
-/*	in RFC 6531..6533.
+/*	in RFC 6531, RFC 6532, and RFC 6533.
 /* .IP "\fBsmtputf8_autodetect_classes (sendmail, verify)\fR"
 /*	Detect that a message requires SMTPUTF8 support for the specified
 /*	mail origin classes.
@@ -84,12 +84,13 @@
 /* .ad
 /* .fi
 /* .IP "\fBdebug_peer_level (2)\fR"
-/*	The increment in verbose logging level when a remote client or
-/*	server matches a pattern in the debug_peer_list parameter.
+/*	The increment in verbose logging level when a nexthop destination,
+/*	remote client or server name or network address matches a pattern
+/*	given with the debug_peer_list parameter.
 /* .IP "\fBdebug_peer_list (empty)\fR"
-/*	Optional list of remote client or server hostname or network
-/*	address patterns that cause the verbose logging level to increase
-/*	by the amount specified in $debug_peer_level.
+/*	Optional list of nexthop destination, remote client or server
+/*	name or network address patterns that, if matched, cause the verbose
+/*	logging level to increase by the amount specified in $debug_peer_level.
 /* .IP "\fBsoft_bounce (no)\fR"
 /*	Safety net to keep mail queued that would otherwise be returned to
 /*	the sender.
@@ -144,7 +145,7 @@
 /* .IP "\fBservice_name (read-only)\fR"
 /*	The master.cf service name of a Postfix daemon process.
 /* SEE ALSO
-/*	http://cr.yp.to/proto/qmqp.html, QMQP protocol
+/*	https://cr.yp.to/proto/qmqp.html, QMQP protocol
 /*	cleanup(8), message canonicalization
 /*	master(8), process manager
 /*	postlogd(8), Postfix logging
@@ -270,6 +271,7 @@ static void qmqpd_open_file(QMQPD_STATE *state)
     cleanup_flags = input_transp_cleanup(CLEANUP_FLAG_MASK_EXTERNAL,
 					 qmqpd_input_transp_mask);
     cleanup_flags |= smtputf8_autodetect(MAIL_SRC_MASK_QMQPD);
+    /* TODO(wietse) REQUIRETLS? */
     state->dest = mail_stream_service(MAIL_CLASS_PUBLIC, var_cleanup_service);
     if (state->dest == 0
 	|| attr_print(state->dest->stream, ATTR_FLAG_NONE,
@@ -491,7 +493,10 @@ static void qmqpd_write_content(QMQPD_STATE *state)
      * 
      * XXX Deal with UNIX-style From_ lines at the start of message content just
      * in case.
+     * 
+     * 202607 Qualys+Mythos: strncmp() requires null-terminated input.
      */
+    VSTRING_TERMINATE(state->message);
     for (next = STR(state->message); /* void */ ; /* void */ ) {
 	if ((ch = qmqpd_next_line(state->message, &start, &len, &next)) < 0)
 	    break;

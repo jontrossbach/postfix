@@ -110,7 +110,7 @@
  /*
   * The subset of inputs that the postdrop command allows.
   */
-#define REC_TYPE_POST_ENVELOPE	"MFSRVAin"
+#define REC_TYPE_POST_ENVELOPE	"MCFSRVAin"
 #define REC_TYPE_POST_CONTENT	"XLN"
 #define REC_TYPE_POST_EXTRACT	"EAR"
 
@@ -177,7 +177,8 @@
   * See also: REC_TYPE_SIZE_FORMAT above.
   */
 #define REC_TYPE_PTR_FORMAT	"%15ld"
-#define REC_TYPE_PTR_PAYL_SIZE	15	/* Payload only, excludes record header. */
+#define REC_TYPE_PTR_PAYL_SIZE	15	/* Payload only, excludes record
+					 * header. */
 
  /*
   * Programmatic interface.

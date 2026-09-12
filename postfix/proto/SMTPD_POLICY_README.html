@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix SMTP Access Policy Delegation </title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -24,14 +25,14 @@ block or accept mail at specific SMTP protocol stages. In addition,
 the Postfix SMTP server can delegate decisions to an external policy
 server (Postfix 2.1 and later). </p>
 
-<p> With this policy delegation mechanism, a simple <a href="#greylist">
-greylist </a> policy can be implemented with only a dozen lines of
+<p> With this policy delegation mechanism, a simple
+<a href="#greylist">greylist</a> policy can be implemented with only a dozen lines of
 Perl, as is shown at the end of this document. A complete example
 can be found in the Postfix source code, in the directory
 examples/smtpd-policy. </p>
 
 <p> Another example of policy delegation is the SPF policy server
-at https://web.archive.org/web/20190221142057/http://www.openspf.org/Software.  </p>
+at http://www.open-spf.org/Software/  </p>
 
 <p> Policy delegation is now the preferred method for adding policies
 to Postfix. It's much easier to develop a new feature in few lines
@@ -116,6 +117,11 @@ policy_context=submission
 <b>Postfix version 3.2 and later:</b>
 server_address=10.3.2.1
 server_port=54321
+<b>Postfix version 3.8 and later:</b>
+compatibility_level=<i>major</i>.<i>minor</i>.<i>patch</i>
+mail_version=3.8.0
+<b>Postfix version 3.12 and later:</b>
+tls_sni=mail.example.com
 [empty line]
 </pre>
 </blockquote>
@@ -202,6 +208,11 @@ server_port=54321
     plaintext connections the protocol and cipher attributes are
     empty and the keysize is zero.  </p>
 
+    <li> <p> The "tls_sni" attribute (Postfix 3.12 and later)
+    specifies the server name indication that the remote SMTP client
+    sent in the TLS handshake. This attribute is empty for plaintext
+    connections and when the remote SMTP client sends no SNI. </p>
+
     <li> <p> The "etrn_domain" attribute is defined only in the
     context of the ETRN command, and specifies the ETRN command
     parameter. </p>
@@ -212,6 +223,17 @@ server_port=54321
     <li> <p> The "policy_context" attribute provides a way to pass
     information that is not available via other attributes (Postfix
     version 3.1 and later). </p>
+
+   <li> <p> The "compatibility_level" attribute corresponds to the
+   compatibility_level parameter value. It has the form
+   <i>major</i>.<i>minor</i>.<i>patch</i> where <i>minor</i> and
+   <i>patch</i> may be absent. </p>
+
+   <li> <p> The "mail_version" attribute corresponds to the
+   mail_version parameter value. It has the form
+   <i>major</i>.<i>minor</i>.<i>patch</i> for stable releases, and
+   <i>major</i>.<i>minor</i>-<i>yyyymmdd</i> for unstable releases.
+   </p>
 
 </ul>
 
@@ -269,7 +291,7 @@ a TCP socket at 127.0.0.1 port 9998. The second example specifies
 an absolute pathname of a UNIX-domain socket. The third example
 specifies a pathname relative to the Postfix queue directory; use
 this for policy servers that are spawned by the Postfix master
-daemon. </p>
+daemon. On many systems, "local" is a synonym for "unix".</p>
 
 <p> To create a policy service that listens on a UNIX-domain socket
 called "policy", and that runs under control of the Postfix spawn(8)
@@ -316,7 +338,7 @@ open relay. </p>
 
 <li> <p> Line 11: this increases the time that a policy server
 process may run to 3600 seconds.  The default time limit of 1000
-seconds is too short; the policy daemon needs to run long as the
+seconds is too short; the policy daemon needs to run as long as the
 SMTP server process that talks to it.
 See the spawn(8) manpage for more information about the
 <i>transport</i>_time_limit parameter.  </p>
@@ -465,7 +487,7 @@ different default actions with different SMTP status codes or text:
 4         reject_unauth_destination
 5         check_policy_service {
 6           inet:host:port1, 
-7           { default_action = 451 4.3.5 See http://www.example.com/support1 }
+7           { default_action = 451 4.3.5 See https://www.example.com/support1 }
 8         } 
 9         ...
 </pre>
@@ -474,10 +496,12 @@ different default actions with different SMTP status codes or text:
 <h2><a name="greylist">Example: greylist policy server</a></h2>
 
 <p> Greylisting is a defense against junk email that is described at
-http://www.greylisting.org/. The idea was discussed on the
+https://www.greylisting.org/. The idea was discussed on the
 postfix-users mailing list <a
-href="http://archives.neohapsis.com/archives/postfix/2002-03/0846.html">
-one year before it was popularized</a>. </p>
+href="https://marc.info/?l=postfix-users&m=101594914212564&w=2">
+one year before it was popularized</a> (<a
+href="http://archives.neohapsis.com/archives/postfix/2002-03/0846.html">alternative
+version</a>). </p>
 
 <p> The file examples/smtpd-policy/greylist.pl in the Postfix source
 tree implements a simplified greylist policy server. This server
@@ -565,7 +589,7 @@ each request and reply. </p>
 
 <li> <p> Line 6: this increases the time that a greylist server
 process may run to 3600 seconds.  The default time limit of 1000
-seconds is too short; the greylist daemon needs to run long as the
+seconds is too short; the greylist daemon needs to run as long as the
 SMTP server process that talks to it.
 See the spawn(8) manpage for more information about the
 <i>transport</i>_time_limit parameter.  </p>
@@ -615,7 +639,7 @@ client/server configuration</a>" section above.  </p>
 domains that often appear in forged email.  At some point
 in cyberspace/time a list of frequently
 forged MAIL FROM domains could be found at
-http://www.monkeys.com/anti-spam/filtering/sender-domain-validate.in.
+https://web.archive.org/web/20080526153208/http://www.monkeys.com/anti-spam/filtering/sender-domain-validate.in.
 
 <blockquote>
 <pre>
@@ -672,7 +696,7 @@ exceptions for mailing lists that use one-time sender addresses,
 because each message will be delayed due to greylisting, and the
 one-time sender addresses can pollute your greylist database
 relatively quickly. Instead of making exceptions, you can automatically
-whitelist clients that survive greylisting repeatedly; this avoids
+allowlist clients that survive greylisting repeatedly; this avoids
 most of the delays and most of the database pollution problem. </p>
 
 <blockquote>
@@ -746,11 +770,11 @@ $database_name="/var/mta/greylist.db";
 $greylist_delay=60;
 
 #
-# Auto-whitelist threshold. Specify 0 to disable, or the number of
+# Auto-allowlist threshold. Specify 0 to disable, or the number of
 # successful "come backs" after which a client is no longer subject
 # to greylisting.
 #
-$auto_whitelist_threshold = 10;
+$auto_allowlist_threshold = 10;
 
 #
 # Demo SMTPD access policy routine. The result is an action just like
@@ -763,10 +787,10 @@ sub smtpd_access_policy {
     # Open the database on the fly.
     open_database() unless $database_obj;
 
-    # Search the auto-whitelist.
-    if ($auto_whitelist_threshold &gt; 0) {
+    # Search the auto-allowlist.
+    if ($auto_allowlist_threshold &gt; 0) {
         $count = read_database($attr{"client_address"});
-        if ($count &gt; $auto_whitelist_threshold) {
+        if ($count &gt; $auto_allowlist_threshold) {
             return "dunno";
         }
     }
@@ -795,8 +819,8 @@ sub smtpd_access_policy {
     #
     syslog $syslog_priority, "request age %d", $now - $time_stamp if $verbose;
     if ($now - $time_stamp &gt; $greylist_delay) {
-        # Update the auto-whitelist.
-        if ($auto_whitelist_threshold &gt; 0) {
+        # Update the auto-allowlist.
+        if ($auto_allowlist_threshold &gt; 0) {
             update_database($attr{"client_address"}, $count + 1);
         }
         return "dunno";

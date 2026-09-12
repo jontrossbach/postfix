@@ -36,6 +36,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
@@ -44,7 +49,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdio.h>			/* strerror() */
 #include <errno.h>
 #include <netdb.h>
 #include <string.h>
@@ -77,7 +81,7 @@ void    qmqpd_peer_init(QMQPD_STATE *state)
     struct sockaddr_storage ss;
     struct sockaddr *sa;
     SOCKADDR_SIZE sa_length;
-    INET_PROTO_INFO *proto_info = inet_proto_info();
+    const INET_PROTO_INFO *proto_info = inet_proto_info();
 
     sa = (struct sockaddr *) &ss;
     sa_length = sizeof(ss);
@@ -195,10 +199,10 @@ void    qmqpd_peer_init(QMQPD_STATE *state)
 	    /*
 	     * Following RFC 2821 section 4.1.3, an IPv6 address literal gets
 	     * a prefix of 'IPv6:'. We do this consistently for all IPv6
-	     * addresses that that appear in headers or envelopes. The fact
-	     * that valid_mailhost_addr() enforces the form helps of course.
-	     * We use the form without IPV6: prefix when doing access
-	     * control, or when accessing the connection cache.
+	     * addresses that appear in headers or envelopes. The fact that
+	     * valid_mailhost_addr() enforces the form helps of course. We
+	     * use the form without IPV6: prefix when doing access control,
+	     * or when accessing the connection cache.
 	     */
 	    else {
 		state->addr = mystrdup(client_addr.buf);
@@ -255,7 +259,7 @@ void    qmqpd_peer_init(QMQPD_STATE *state)
 		for (res = res0; /* void */ ; res = res->ai_next) {
 		    if (res == 0) {
 			msg_warn("hostname %s does not resolve to address %s",
-				 state->addr, state->name);
+				 state->name, state->addr);
 			REJECT_PEER_NAME(state);
 			break;
 		    }

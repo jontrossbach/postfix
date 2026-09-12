@@ -34,26 +34,13 @@
 /*	Must be O_RDONLY.
 /* .IP dict_flags
 /*	See dict_open(3).
-/* .PP
-/*	Configuration parameters:
-/* .IP dbpath
-/*	Path to SQLite database
-/* .IP query
-/*	Query template. Before the query is actually issued, variable
-/*	substitutions are performed. See sqlite_table(5) for details.
-/* .IP result_format
-/*	The format used to expand results from queries.  Substitutions
-/*	are performed as described in sqlite_table(5). Defaults to
-/*	returning the lookup result unchanged.
-/* .IP expansion_limit
-/*	Limit (if any) on the total number of lookup result values.
-/*	Lookups which exceed the limit fail with dict->error=DICT_ERR_RETRY.
-/*	Note that each non-empty (and non-NULL) column of a
-/*	multi-column result row counts as one result.
-/* .IP "select_field, where_field, additional_conditions"
-/*	Legacy query interface.
+/* DIAGNOSTICS
+/*	dict_sqlite_open() logs a warning when the query parameter value
+/*	does not use the recommended '' quotes to protect against SQL
+/*	injection (bad examples; no quotes or "" quotes).
 /* SEE ALSO
 /*	dict(3) generic dictionary manager
+/*	sqlite_table(5) Postfix sqlite client configuration
 /* AUTHOR(S)
 /*	Axel Steiner
 /*	ast@treibsand.com
@@ -63,18 +50,25 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
 
 #include <sys_defs.h>
 #include <string.h>
+#include <ctype.h>
 
 #ifdef HAS_SQLITE
 #include <sqlite3.h>
 
 #if !defined(SQLITE_VERSION_NUMBER) || (SQLITE_VERSION_NUMBER < 3005004)
 #define sqlite3_prepare_v2 sqlite3_prepare
+#endif
+#if !defined(SQLITE_VERSION_NUMBER) || (SQLITE_VERSION_NUMBER < 3005000)
+#define sqlite3_open_v2(fname,ppDB,flags,zVfs) sqlite_open(fname,ppDB)
 #endif
 
 /* Utility library. */
@@ -166,7 +160,7 @@ static const char *dict_sqlite_lookup(DICT *dict, const char *name)
      * Don't frustrate future attempts to make Postfix UTF-8 transparent.
      */
     if ((dict->flags & DICT_FLAG_UTF8_ACTIVE) == 0
-	&& !valid_utf8_string(name, strlen(name))) {
+	&& !valid_utf8_stringz(name)) {
 	if (msg_verbose)
 	    msg_info("%s: %s: Skipping lookup of non-UTF-8 key '%s'",
 		     myname, dict_sqlite->parser->name, name);
@@ -174,7 +168,7 @@ static const char *dict_sqlite_lookup(DICT *dict, const char *name)
     }
 
     /*
-     * Optionally fold the key. Folding may be enabled on on-the-fly.
+     * Optionally fold the key. Folding may be enabled on-the-fly.
      */
     if (dict->flags & DICT_FLAG_FOLD_FIX) {
 	if (dict->fold_buf == 0)
@@ -264,6 +258,38 @@ static const char *dict_sqlite_lookup(DICT *dict, const char *name)
 	    retval : 0);
 }
 
+/* flag_non_recommended_query - as the name says. */
+
+static void flag_non_recommended_query(const char *query,
+				               const char *sqlitecf)
+{
+    const char *cp;
+    int     in_quote;
+    const int squote = '\'';
+    const int dquote = '"';
+
+    for (in_quote = 0, cp = query; *cp != 0; cp++) {
+	if (in_quote == 0) {
+	    if (*cp == squote || *cp == dquote)
+		in_quote = *cp;
+	} else if (*cp == in_quote) {
+	    in_quote = 0;
+	}
+	if (in_quote == squote)
+	    continue;
+	if (*cp == '%') {
+	    if (cp[1] == '%') {
+		cp += 1;
+	    } else if (ISALNUM(cp[1])) {
+		msg_warn("%s:%s: query >%s< contains >%.2s< without the "
+			 "recommended '' quotes", DICT_TYPE_SQLITE, sqlitecf,
+			 query, cp);
+		cp += 1;
+	    }
+	}
+    }
+}
+
 /* sqlite_parse_config - parse sqlite configuration file */
 
 static void sqlite_parse_config(DICT_SQLITE *dict_sqlite, const char *sqlitecf)
@@ -282,6 +308,8 @@ static void sqlite_parse_config(DICT_SQLITE *dict_sqlite, const char *sqlitecf)
 	db_common_sql_build_query(buf, dict_sqlite->parser);
 	dict_sqlite->query = vstring_export(buf);
     }
+    /* Flag %[a-zA-Z0-9] if not protected with ''. */
+    flag_non_recommended_query(dict_sqlite->query, sqlitecf);
     dict_sqlite->result_format =
 	cfg_get_str(dict_sqlite->parser, "result_format", "%s", 1, 0);
     dict_sqlite->expansion_limit =
@@ -337,13 +365,19 @@ DICT   *dict_sqlite_open(const char *name, int open_flags, int dict_flags)
     dict_sqlite->parser = parser;
     sqlite_parse_config(dict_sqlite, name);
 
-    if (sqlite3_open(dict_sqlite->dbpath, &dict_sqlite->db))
-	msg_fatal("%s:%s: Can't open database: %s\n",
-		  DICT_TYPE_SQLITE, name, sqlite3_errmsg(dict_sqlite->db));
+    if (sqlite3_open_v2(dict_sqlite->dbpath, &dict_sqlite->db,
+			SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+	DICT   *dict = dict_surrogate(DICT_TYPE_SQLITE, name, open_flags,
+			      dict_flags, "%s:%s: open database %s: %s: %m",
+				DICT_TYPE_SQLITE, name, dict_sqlite->dbpath,
+				      sqlite3_errmsg(dict_sqlite->db));
 
+	dict_sqlite_close(&dict_sqlite->dict);
+	return dict;
+    }
     dict_sqlite->dict.owner = cfg_get_owner(dict_sqlite->parser);
 
-    return (DICT_DEBUG (&dict_sqlite->dict));
+    return (&dict_sqlite->dict);
 }
 
 #endif

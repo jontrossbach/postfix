@@ -17,6 +17,10 @@
 /*	SMTP_TLS_POLICY *tls;
 /*
 /*	void	smtp_tls_policy_cache_flush()
+/*
+/*	int	smtp_tls_authorize_mx_hostname(tls, qname)
+/*	SMTP_TLS_POLICY *tls;
+/*	const char *qname;
 /* DESCRIPTION
 /*	smtp_tls_list_init() initializes lookup tables used by the TLS
 /*	policy engine.
@@ -31,12 +35,22 @@
 /*	When any required table or DNS lookups fail, the TLS level
 /*	is set to TLS_LEV_INVALID, the "why" argument is updated
 /*	with the error reason and the result value is zero (false).
+/*	When var_smtp_tls_enf_sts_mx_pat is not null, and a policy plugin
+/*	specifies a policy_type "sts" plus one or more mx_host_pattern
+/*	instances, transform the policy as follows: allow only MX hosts
+/*	that match an mx_host_pattern instance, and match a server
+/*	certificate against the server hostname.
 /*
 /*	smtp_tls_policy_dummy() initializes a trivial, non-cached,
 /*	policy with TLS disabled.
 /*
 /*	smtp_tls_policy_cache_flush() destroys the TLS policy cache
 /*	and contents.
+/*
+/*	smtp_tls_authorize_mx_hostname() authorizes an MX host if the
+/*	name used for host lookup satisfies a TLS policy MX name
+/*	constraint (for example, an STS policy MX pattern), or if the
+/*	TLS policy has no name constraint.
 /*
 /*	Arguments:
 /* .IP why
@@ -102,16 +116,22 @@
 #include <msg.h>
 #include <mymalloc.h>
 #include <vstring.h>
+#include <sane_strtol.h>
 #include <stringops.h>
 #include <valid_hostname.h>
 #include <valid_utf8_hostname.h>
 #include <ctable.h>
+#include <midna_domain.h>
 
 /* Global library. */
 
 #include <mail_params.h>
 #include <maps.h>
 #include <dsn_buf.h>
+
+/* TLS library. */
+
+#include <tlsrpt_wrapper.h>
 
 /* DNS library. */
 
@@ -130,6 +150,58 @@ static void dane_init(SMTP_TLS_POLICY *, SMTP_ITERATOR *);
 
 static MAPS *tls_policy;		/* lookup table(s) */
 static MAPS *tls_per_site;		/* lookup table(s) */
+
+/* match_sts_mx_host_pattern -  match hostname against STS policy MX pattern */
+
+static int match_sts_mx_host_pattern(const char *pattern, const char *qname)
+{
+    const char *first_dot_in_qname;
+
+    /* Caller guarantees that inputs are in ASCII form. */
+    return (strcasecmp(qname, pattern) == 0
+	    || (pattern[0] == '*' && pattern[1] == '.' && pattern[2] != 0
+		&& (first_dot_in_qname = strchr(qname, '.')) != 0
+		&& first_dot_in_qname > qname
+		&& strcasecmp(first_dot_in_qname + 1, pattern + 2) == 0));
+}
+
+/* smtp_tls_authorize_mx_hostname - enforce applicable MX hostname policy */
+
+int     smtp_tls_authorize_mx_hostname(SMTP_TLS_POLICY *tls, const char *name)
+{
+
+#define SAFE_FOR_SMTP_TLS_ENF_STS_MX_PAT(tls) (var_smtp_tls_enf_sts_mx_pat \
+	    && (tls)->ext_policy_type != 0 \
+	    && strcasecmp((tls)->ext_policy_type, "sts") == 0 \
+	    && (tls)->matchargv != 0 && (tls)->ext_mx_host_patterns != 0)
+
+    /* Enforce STS policy MX patterns. */
+    if (SAFE_FOR_SMTP_TLS_ENF_STS_MX_PAT(tls)) {
+	const char *aname;
+	char  **pattp;
+
+#ifndef NO_EAI
+	if (!allascii(name) && (aname = midna_domain_to_ascii(name)) != 0) {
+	    if (msg_verbose)
+		msg_info("%s asciified to %s", name, aname);
+	} else
+#endif
+	    aname = name;
+	for (pattp = tls->ext_mx_host_patterns->argv; *pattp; pattp++) {
+	    if (match_sts_mx_host_pattern(*pattp, aname)) {
+		if (msg_verbose)
+		    msg_info("MX name '%s' matches STS MX pattern for '%s'",
+			     aname, tls->ext_policy_domain ? tls->ext_policy_domain : "");
+		return (1);
+	    }
+	}
+	msg_warn("MX name '%s' does not match STS MX pattern for '%s'",
+	       aname, tls->ext_policy_domain ? tls->ext_policy_domain : "");
+	return (0);
+    }
+    /* No applicable policy name patterns. */
+    return (1);
+}
 
 /* smtp_tls_list_init - initialize per-site policy lists */
 
@@ -221,15 +293,21 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
 {
     const char *lookup;
     char   *policy;
-    char   *saved_policy;
+    char   *saved_policy = 0;
     char   *tok;
-    const char *err;
     char   *name;
     char   *val;
     static VSTRING *cbuf;
+    char   *free_me = 0;
 
 #undef FREE_RETURN
-#define FREE_RETURN do { myfree(saved_policy); return; } while (0)
+#define FREE_RETURN do { \
+	if (saved_policy) \
+	    myfree(saved_policy); \
+	if (free_me) \
+	    myfree(free_me); \
+	return; \
+    } while (0)
 
 #define INVALID_RETURN(why, levelp) do { \
 	    MARK_INVALID((why), (levelp)); FREE_RETURN; } while (0)
@@ -250,7 +328,7 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
     }
     saved_policy = policy = mystrdup(lookup);
 
-    if ((tok = mystrtok(&policy, CHARS_COMMA_SP)) == 0) {
+    if ((tok = mystrtokq(&policy, CHARS_COMMA_SP, CHARS_BRACE)) == 0) {
 	msg_warn("%s: invalid empty policy", WHERE);
 	INVALID_RETURN(tls->why, site_level);
     }
@@ -265,7 +343,7 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
      * Warn about ignored attributes when TLS is disabled.
      */
     if (*site_level < TLS_LEV_MAY) {
-	while ((tok = mystrtok(&policy, CHARS_COMMA_SP)) != 0)
+	while ((tok = mystrtokq(&policy, CHARS_COMMA_SP, CHARS_BRACE)) != 0)
 	    msg_warn("%s: ignoring attribute \"%s\" with TLS disabled",
 		     WHERE, tok);
 	FREE_RETURN;
@@ -274,9 +352,18 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
     /*
      * Errors in attributes may have security consequences, don't ignore
      * errors that can degrade security.
+     * 
+     * Caution: normalize whitespace, to neutralize line break etc. characters
+     * inside the value portion of { name = value }.
      */
-    while ((tok = mystrtok(&policy, CHARS_COMMA_SP)) != 0) {
-	if ((err = split_nameval(tok, &name, &val)) != 0) {
+    while ((tok = mystrtokq(&policy, CHARS_COMMA_SP, CHARS_BRACE)) != 0) {
+	const char *err;
+
+#define EXTPAR_OPT	(EXTPAR_FLAG_STRIP | EXTPAR_FLAG_NORMAL_WS)
+
+	if ((tok[0] == CHARS_BRACE[0]
+	     && (err = free_me = extpar(&tok, CHARS_BRACE, EXTPAR_OPT)) != 0)
+	    || (err = split_nameval(tok, &name, &val)) != 0) {
 	    msg_warn("%s: malformed attribute/value pair \"%s\": %s",
 		     WHERE, tok, err);
 	    INVALID_RETURN(tls->why, site_level);
@@ -334,9 +421,10 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
 		INVALID_RETURN(tls->why, site_level);
 		break;
 	    case TLS_LEV_FPRINT:
-		if (!tls->dane)
-		    tls->dane = tls_dane_alloc();
-		tls_dane_add_fpt_digests(tls->dane, val, "|", smtp_mode);
+		if (tls->matchargv == 0)
+		    tls->matchargv = argv_split(val, "|");
+		else
+		    argv_split_append(tls->matchargv, val, "|");
 		break;
 	    case TLS_LEV_VERIFY:
 	    case TLS_LEV_SECURE:
@@ -390,10 +478,116 @@ static void tls_policy_lookup_one(SMTP_TLS_POLICY *tls, int *site_level,
 	    }
 	    continue;
 	}
+	/* Last one wins. */
+	if (!strcasecmp(name, "enable_rpk")) {
+	    /* Ultimately ignored at some security levels */
+	    if (strcasecmp(val, "yes") == 0) {
+		tls->enable_rpk = 1;
+	    } else if (strcasecmp(val, "no") == 0) {
+		tls->enable_rpk = 0;
+	    } else {
+		msg_warn("%s: attribute \"%s\" has bad value: \"%s\"",
+			 WHERE, name, val);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    continue;
+	}
+	/* Only one instance per policy. */
+	if (!strcasecmp(name, EXT_POLICY_TTL)) {
+	    char   *end;
+	    long    lval;
+
+	    if (tls->ext_policy_ttl != EXT_POLICY_TTL_UNSET) {
+		msg_warn("%s: attribute \"%s\" is specified multiple times",
+			 WHERE, name);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    if (!alldig(val) || ((lval = sane_strtol(val, &end, 10)),
+				 ((tls->ext_policy_ttl = lval) != lval))
+		|| *end != 0) {
+		msg_warn("%s: attribute \"%s\" has a malformed value: \"%s\"",
+			 WHERE, name, val);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    continue;
+	}
+	/* Only one instance per policy. */
+	if (!strcasecmp(name, EXT_POLICY_TYPE)) {
+	    if (tls->ext_policy_type) {
+		msg_warn("%s: attribute \"%s\" is specified multiple times",
+			 WHERE, name);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    if (!valid_tlsrpt_policy_type(val)) {
+		msg_warn("%s: attribute \"%s\" has an unexpected value: \"%s\"",
+			 WHERE, name, val);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    tls->ext_policy_type = mystrdup(val);
+	    continue;
+	}
+	/* Only one instance per policy. */
+	if (!strcasecmp(name, EXT_POLICY_DOMAIN)) {
+	    if (tls->ext_policy_domain) {
+		msg_warn("%s: attribute \"%s\" is specified multiple times",
+			 WHERE, name);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    if (!valid_hostname(val, DO_GRIPE)) {
+		msg_warn("%s: attribute \"%s\" has a malformed value: \"%s\"",
+			 WHERE, name, val);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    tls->ext_policy_domain = mystrdup(val);
+	    continue;
+	}
+	/* Multiple instances per policy are allowed. */
+	if (!strcasecmp(name, EXT_POLICY_STRING)) {
+	    if (tls->ext_policy_strings == 0)
+		tls->ext_policy_strings = argv_alloc(1);
+	    argv_add(tls->ext_policy_strings, val, (char *) 0);
+	    continue;
+	}
+	/* Multiple instances per policy are allowed. */
+	if (!strcasecmp(name, EXT_MX_HOST_PATTERN)) {
+	    if (tls->ext_mx_host_patterns == 0)
+		tls->ext_mx_host_patterns = argv_alloc(1);
+	    argv_add(tls->ext_mx_host_patterns, val, (char *) 0);
+	    continue;
+	}
+	/* Only one instance per policy. */
+	if (!strcasecmp(name, EXT_POLICY_FAILURE)) {
+	    if (tls->ext_policy_failure != 0) {
+		msg_warn("%s: attribute \"%s\" is specified multiple times",
+			 WHERE, name);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    if (!valid_tlsrpt_policy_failure(val)) {
+		msg_warn("%s: attribute \"%s\" has an unexpected value: \"%s\"",
+			 WHERE, name, val);
+		INVALID_RETURN(tls->why, site_level);
+	    }
+	    tls->ext_policy_failure = mystrdup(val);
+	    continue;
+	}
 	msg_warn("%s: invalid attribute name: \"%s\"", WHERE, name);
 	INVALID_RETURN(tls->why, site_level);
     }
-
+    if (tls->ext_policy_type == 0) {
+	if (tls->ext_policy_ttl != EXT_POLICY_TTL_UNSET
+	    || tls->ext_policy_strings
+	    || tls->ext_policy_domain || tls->ext_mx_host_patterns
+	    || tls->ext_policy_failure) {
+	    msg_warn("%s: built-in policy has unexpected attribute "
+		     "policy_ttl, policy_domain, policy_string, "
+		     "mx_host_pattern or policy_failure", WHERE);
+	    INVALID_RETURN(tls->why, site_level);
+	}
+    }
+    if (SAFE_FOR_SMTP_TLS_ENF_STS_MX_PAT(tls)) {
+	argv_truncate(tls->matchargv, 0);
+	argv_add(tls->matchargv, "hostname", (char *) 0);
+    }
     FREE_RETURN;
 }
 
@@ -518,16 +712,34 @@ static void *policy_create(const char *unused_key, void *context)
 
     smtp_tls_policy_init(tls, dsb_create());
     tls->conn_reuse = var_smtp_tls_conn_reuse;
+    tls->enable_rpk = var_smtp_tls_enable_rpk;
 
     /*
      * Compute the per-site TLS enforcement level. For compatibility with the
      * original TLS patch, this algorithm is gives equal precedence to host
      * and next-hop policies.
+     * 
+     * When "TLS-Required: no" is in effect, skip TLS policy lookup and limit
+     * the security level to "may". Do not reset the security level after
+     * policy lookup, as that would result in errors. For example, when TLSA
+     * records are looked up for security level "dane", and then the security
+     * level is reset to "may", the activation of those TLSA records will
+     * fail.
      */
     tls->level = global_tls_level();
     site_level = TLS_LEV_NOTFOUND;
 
-    if (tls_policy) {
+    if (STATE_TLS_NOT_REQUIRED(iter->parent)) {
+	if (msg_verbose)
+	    msg_info("%s: no tls policy lookup", __func__);
+	if (var_smtp_tls_wrappermode) {
+	    if (tls->level > TLS_LEV_ENCRYPT)
+		tls->level = TLS_LEV_ENCRYPT;
+	} else {
+	    if (tls->level > TLS_LEV_MAY)
+		tls->level = TLS_LEV_MAY;
+	}
+    } else if (tls_policy) {
 	tls_policy_lookup(tls, &site_level, dest, "next-hop destination");
     } else if (tls_per_site) {
 	tls_site_lookup(tls, &site_level, dest, "next-hop destination");
@@ -602,6 +814,13 @@ static void *policy_create(const char *unused_key, void *context)
      */
     set_cipher_grade(tls);
 
+/*
+ * Even when soliciting raw public keys, synthesize TLSA RRs that also match
+ * certificates.  Though this is fragile, it maintains compatibility with
+ * servers that never return RPKs.
+ */
+#define DONT_SUPPRESS_CERT_MATCH	0
+
     /*
      * Use main.cf cert_match setting if not set in per-destination table.
      */
@@ -617,16 +836,26 @@ static void *policy_create(const char *unused_key, void *context)
     case TLS_LEV_FPRINT:
 	if (tls->dane == 0)
 	    tls->dane = tls_dane_alloc();
-	if (tls->dane->tlsa == 0) {
-	    tls_dane_add_fpt_digests(tls->dane, var_smtp_tls_fpt_cmatch,
-				     CHARS_COMMA_SP, smtp_mode);
-	    if (tls->dane->tlsa == 0) {
-		msg_warn("nexthop domain %s: configured at fingerprint "
-		       "security level, but with no fingerprints to match.",
-			 dest);
-		MARK_INVALID(tls->why, &tls->level);
-		return ((void *) tls);
+	/* Process the specified fingerprint match patterns */
+	if (tls->matchargv) {
+	    int     i;
+
+	    for (i = 0; i < tls->matchargv->argc; ++i) {
+		tls_dane_add_fpt_digests(tls->dane, DONT_SUPPRESS_CERT_MATCH,
+					 tls->matchargv->argv[i], "",
+					 smtp_mode);
 	    }
+	} else {
+	    tls_dane_add_fpt_digests(tls->dane, DONT_SUPPRESS_CERT_MATCH,
+				     var_smtp_tls_fpt_cmatch, CHARS_COMMA_SP,
+				     smtp_mode);
+	}
+	if (tls->dane->tlsa == 0) {
+	    msg_warn("nexthop domain %s: configured at fingerprint "
+		     "security level, but with no fingerprints to match.",
+		     dest);
+	    MARK_INVALID(tls->why, &tls->level);
+	    return ((void *) tls);
 	}
 	break;
     case TLS_LEV_VERIFY:
@@ -675,6 +904,16 @@ static void policy_delete(void *item, void *unused_context)
     if (tls->dane)
 	tls_dane_free(tls->dane);
     dsb_free(tls->why);
+    if (tls->ext_policy_type)
+	myfree(tls->ext_policy_type);
+    if (tls->ext_policy_domain)
+	myfree(tls->ext_policy_domain);
+    if (tls->ext_policy_strings)
+	argv_free(tls->ext_policy_strings);
+    if (tls->ext_mx_host_patterns)
+	argv_free(tls->ext_mx_host_patterns);
+    if (tls->ext_policy_failure)
+	myfree(tls->ext_policy_failure);
 
     myfree((void *) tls);
 }

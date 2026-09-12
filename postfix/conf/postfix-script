@@ -28,6 +28,10 @@
 #	Google, Inc.
 #	111 8th Avenue
 #	New York, NY 10011, USA
+#
+#	Wietse Venema
+#	porcupine.org
+#	Amawalk, NY 10501, USA
 #--
 
 # Avoid POSIX death due to SIGHUP when some parent process exits.
@@ -92,8 +96,8 @@ def_config_directory=`$command_directory/postconf -dh config_directory` || {
 # If this is a secondary instance, don't touch shared files.
 
 instances=`test ! -f $def_config_directory/main.cf ||
-    $command_directory/postconf -c $def_config_directory \
-    -h multi_instance_directories | sed 's/,/ /'` || {
+    $command_directory/postconf -qc $def_config_directory \
+    -h multi_instance_directories | sed 'y/,/ /'` || {
 	$FATAL cannot execute $command_directory/postconf!
 	exit 1
 }
@@ -138,6 +142,7 @@ start|start-fg)
 		#}
 		# Foreground this so it can be stopped. All inodes are cached.
 		$daemon_directory/postfix-script check-warn
+		$daemon_directory/postfix-script check-alias-maps-migration
 	fi
 	$INFO starting the Postfix mail system || exit 1
 	case $1 in
@@ -216,6 +221,9 @@ abort)
 
 reload)
 
+	# Warn once for deprecated parameters.
+	$command_directory/postconf >/dev/null
+
 	$daemon_directory/master -t 2>/dev/null && {
 		$FATAL the Postfix mail system is not running
 		exit 1
@@ -238,11 +246,15 @@ flush)
 check)
 
 	$daemon_directory/postfix-script check-fatal || exit 1
+	$daemon_directory/postfix-script check-alias-maps-migration
 	$daemon_directory/postfix-script check-warn
 	exit 0
 	;;
 
 status)
+
+	# Warn once for deprecated parameters.
+	$command_directory/postconf >/dev/null
 
 	$daemon_directory/master -t 2>/dev/null && {
 		$INFO the Postfix mail system is not running
@@ -268,12 +280,12 @@ check-fatal)
 		exit 1
 	}
 
-	maillog_file=`$command_directory/postconf -h maillog_file` || {
+	maillog_file=`$command_directory/postconf -qh maillog_file` || {
 		$FATAL cannot execute $command_directory/postconf!
 		exit 1
 	}
 	test -n "$maillog_file" && {
-		$command_directory/postconf -M postlog/unix-dgram 2>/dev/null \
+		$command_directory/postconf -qM postlog/unix-dgram 2>/dev/null \
 		    | grep . >/dev/null || {
 			$FATAL "missing 'postlog' service in master.cf - run 'postfix upgrade-configuration'"
 			exit 1
@@ -288,8 +300,40 @@ check-fatal)
 	exit 0
 	;;
 
+check-alias-maps-migration)
+	# This command is NOT part of the public interface.
+
+	# As of Postfix 3.11, the default alias_maps value
+	# contains $default_database_type:/path/to/aliases. When
+	# default_database_type is changed to lmdb or cdb, Postfix
+	# will not generate hash:/path/to/aliases requests that can
+	# be resolved dynamically with enable-redirect or enable-reindex.
+	# 
+	# To avoid this, craft a one-time stand-alone re-indexing request.
+	test -f $config_directory/check-alias-maps-migration-done && exit 0
+	test "x`$command_directory/postconf -h non_bdb_migration_level`" = xenable-reindex || exit 0
+	BACKUP_IFS="$IFS"
+	for map	in `$command_directory/postconf -hx alias_maps`
+	do
+	    echo "$map" | (
+		IFS=: read type path; IFS="$BACKUP_IFS"
+		case "$type" in
+		cdb|lmdb)
+		    test ! -f "$path.$type" -a -f "$path" -a -f "$path.db" && {
+			$daemon_directory/nbdb_reindexd -S "hash:$path" ||
+			    $WARN "See https://www.postfix.org/NON_BERKELEYDB_README.html for suggestions"
+		    }
+		esac
+	    )
+	done
+	touch $config_directory/check-alias-maps-migration-done
+	;;
+
 check-warn)
 	# This command is NOT part of the public interface.
+
+	# Warn once for deprecated parameters.
+	$command_directory/postconf >/dev/null
 
 	# Check Postfix root-owned directory owner/permissions.
 
@@ -328,7 +372,7 @@ check-warn)
 	# Check Postfix mail_owner-owned directory tree owner.
 
 	find `ls -d $queue_directory/* | \
-	    egrep '/(saved|incoming|active|defer|deferred|bounce|hold|trace|corrupt|public|private|flush)$'` \
+	    grep -E '/(saved|incoming|active|defer|deferred|bounce|hold|trace|corrupt|public|private|flush)$'` \
 	    ! \( -type p -o -type s \) ! -user $mail_owner \
 		-exec $WARN not owned by $mail_owner: {} \;
 
@@ -395,9 +439,9 @@ post-install)
 	$daemon_directory/post-install "$@"
 	;;
 
-tls)
-	shift
-	$daemon_directory/postfix-tls-script "$@"
+tls|non-bdb)
+	cmd=$1; shift
+	$daemon_directory/postfix-$cmd-script "$@"
 	;;
 
 /*)
@@ -413,7 +457,7 @@ logrotate)
 	for name in maillog_file maillog_file_compressor \
 	   maillog_file_rotate_suffix
 	do
-	    value="`$command_directory/postconf -h $name`"
+	    value="`$command_directory/postconf -qh $name`"
 	    case "$value" in
 	    "") $FATAL "empty '$name' parameter value - logfile rotation failed"
 		exit 1;;
@@ -439,7 +483,7 @@ logrotate)
 	;;
 
 *)
-	$FATAL "unknown command: '$1'. Usage: postfix start (or stop, reload, abort, flush, check, status, set-permissions, upgrade-configuration, logrotate)"
+	$FATAL "unknown command: '$1'. Usage: postfix start (or stop, reload, abort, flush, check, status, set-permissions, upgrade-configuration, logrotate, tls, non-bdb)"
 	exit 1
 	;;
 

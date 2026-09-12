@@ -59,6 +59,7 @@ struct addrinfo {
   * Modern systems define this in <sys/socket.h>.
   */
 struct sockaddr_storage {
+    sa_family_t ss_family;
     struct sockaddr_in dummy;		/* alignment!! */
 };
 
@@ -109,12 +110,12 @@ extern char *gai_strerror(int);
   * they suggest that space for the null terminator is not included.
   */
 #ifdef HAS_IPV6
-# define MAI_HOSTADDR_STRSIZE	INET6_ADDRSTRLEN
+#define MAI_HOSTADDR_STRSIZE	INET6_ADDRSTRLEN
 #else
-# ifndef INET_ADDRSTRLEN
-#  define INET_ADDRSTRLEN	16
-# endif
-# define MAI_HOSTADDR_STRSIZE	INET_ADDRSTRLEN
+#ifndef INET_ADDRSTRLEN
+#define INET_ADDRSTRLEN	16
+#endif
+#define MAI_HOSTADDR_STRSIZE	INET_ADDRSTRLEN
 #endif
 
 #define MAI_HOSTNAME_STRSIZE	1025
@@ -209,6 +210,12 @@ extern void myaddrinfo_control(int,...);
 	if (_aierr) \
 	    msg_fatal("sockaddr_to_hostname: %s", MAI_STRERROR(_aierr)); \
     } while (0)
+
+ /*
+  * sane_sockaddr_to_hostaddr.c
+  */
+extern int WARN_UNUSED_RESULT sane_sockaddr_to_hostaddr(struct sockaddr *,
+              SOCKADDR_SIZE *, MAI_HOSTADDR_STR *, MAI_SERVPORT_STR *, int);
 
 /* LICENSE
 /* .ad

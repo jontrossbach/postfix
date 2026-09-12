@@ -10,24 +10,31 @@
 /*	void	tls_set_dh_from_file(path)
 /*	const char *path;
 /*
-/*	void	tls_auto_eecdh_curves(ctx, configured)
+/*	void	tls_auto_groups(ctx, eecdh, ffdhe)
 /*	SSL_CTX	*ctx;
-/*	char	*configured;
+/*	char	*eecdh;
+/*	char	*ffdhe;
 /*
-/*	void	tls_tmp_dh(ctx)
+/*	void	tls_tmp_dh(ctx, useauto)
 /*	SSL_CTX *ctx;
+/*	int	useauto;
 /* DESCRIPTION
 /*	This module maintains parameters for Diffie-Hellman key generation.
 /*
 /*	tls_tmp_dh() returns the configured or compiled-in FFDHE
-/*	group parameters.
+/*	group parameters.  The useauto argument enables OpenSSL-builtin group
+/*	selection in preference to our own compiled-in group.  This may
+/*	interoperate better with overly strict peers that accept only
+/*	"standard" groups.
 /*
 /*	tls_set_dh_from_file() overrides compiled-in DH parameters
 /*	with those specified in the named files. The file format
 /*	is as expected by the PEM_read_DHparams() routine.
 /*
-/*	tls_auto_eecdh_curves() enables negotiation of the most preferred curve
-/*	among the curves specified by the "configured" argument.
+/*	tls_auto_groups() enables negotiation of the most preferred key
+/*	exchange group among those specified by the "eecdh" and "ffdhe"
+/*	arguments.  The "ffdhe" argument is only used with OpenSSL 3.0
+/*	and later, and applies to TLS 1.3 and up.
 /* DIAGNOSTICS
 /*	In case of error, tls_set_dh_from_file() logs a warning and
 /*	ignores the request.
@@ -68,6 +75,7 @@
  /*
   * Global library
   */
+#include <been_here.h>
 #include <mail_params.h>
 
 /* TLS library. */
@@ -78,12 +86,20 @@
 #ifndef OPENSSL_NO_ECDH
 #include <openssl/ec.h>
 #endif
+#if OPENSSL_VERSION_PREREQ(3,0)
+#include <openssl/decoder.h>
+#endif
 
 /* Application-specific. */
 
  /*
   * Compiled-in FFDHE (finite-field ephemeral Diffie-Hellman) parameters.
   * Used when no parameters are explicitly loaded from a site-specific file.
+  * 
+  * With OpenSSL 3.0 and later when no explicit parameter file is specified by
+  * the administrator (or the setting is "auto"), we delegate group selection
+  * to OpenSSL via SSL_CTX_set_dh_auto(3).
+  * 
   * Using an ASN.1 DER encoding avoids the need to explicitly manipulate the
   * internal representation of DH parameter objects.
   * 
@@ -94,167 +110,339 @@
  /*-
   * Generated via:
   *   $ openssl dhparam -2 -outform DER 2048 2>/dev/null |
-  *     hexdump -ve '/1 "0x%02x, "' | fmt
+  *     hexdump -ve '/1 "0x%02x, "' | fmt -73
   * TODO: generate at compile-time. But that is no good for the majority of
   * sites that install pre-compiled binaries, and breaks reproducible builds.
   * Instead, generate at installation time and use main.cf configuration.
   */
-static unsigned char dh2048_der[] = {
-    0x30, 0x82, 0x01, 0x08, 0x02, 0x82, 0x01, 0x01, 0x00, 0x9e, 0x28, 0x15,
-    0xc5, 0xcc, 0x9b, 0x5a, 0xb0, 0xe9, 0xab, 0x74, 0x8b, 0x2a, 0x23, 0xce,
-    0xea, 0x87, 0xa0, 0x18, 0x09, 0xd0, 0x40, 0x2c, 0x93, 0x23, 0x5d, 0xc0,
-    0xe9, 0x78, 0x2c, 0x53, 0xd9, 0x3e, 0x21, 0x14, 0x89, 0x5c, 0x79, 0x73,
-    0x1e, 0xbd, 0x23, 0x1e, 0x18, 0x65, 0x6d, 0xd2, 0x3c, 0xeb, 0x41, 0xca,
-    0xbb, 0xa9, 0x99, 0x55, 0x84, 0xae, 0x9e, 0x70, 0x57, 0x25, 0x21, 0x42,
-    0xaa, 0xdb, 0x82, 0xc6, 0xe6, 0xf1, 0xcf, 0xb7, 0xbc, 0x2a, 0x56, 0xcc,
-    0x55, 0x1f, 0xad, 0xe9, 0x68, 0x18, 0x22, 0xfc, 0x09, 0x62, 0xc3, 0x32,
-    0x1b, 0x05, 0x1f, 0xce, 0xec, 0xe3, 0x6d, 0xb5, 0x79, 0xe0, 0x89, 0x45,
-    0xf3, 0xf3, 0x26, 0xa3, 0x81, 0xd9, 0x59, 0xee, 0xed, 0x78, 0xbe, 0x0e,
-    0xdd, 0xf7, 0xef, 0xcb, 0x81, 0x3f, 0x01, 0xb7, 0x10, 0x8f, 0x0d, 0xbe,
-    0x29, 0x21, 0x13, 0xff, 0x2a, 0x13, 0x25, 0x75, 0x99, 0xec, 0xf5, 0x2d,
-    0x49, 0x01, 0x1d, 0xa4, 0x13, 0xe8, 0x2c, 0xc8, 0x13, 0x60, 0x57, 0x98,
-    0xb1, 0x06, 0x45, 0x77, 0xa4, 0x24, 0xf9, 0x27, 0x3f, 0x08, 0xe6, 0x9b,
-    0x4b, 0x20, 0x3b, 0x43, 0x69, 0xa3, 0xcc, 0x9a, 0xc4, 0x3c, 0x1e, 0xec,
-    0xb7, 0x35, 0xe4, 0x59, 0x6b, 0x6d, 0x2a, 0xdf, 0xf7, 0x0b, 0xd4, 0x5a,
-    0x0f, 0x79, 0x80, 0xe1, 0x75, 0x4c, 0x10, 0xea, 0x26, 0xf0, 0xd5, 0xf3,
-    0xa6, 0x15, 0xa9, 0x3e, 0x3d, 0x0d, 0xb8, 0x53, 0x50, 0x49, 0x77, 0x49,
-    0x47, 0x43, 0x39, 0xee, 0xb8, 0x8a, 0xe5, 0x14, 0xc4, 0xe3, 0x10, 0xfb,
-    0xf5, 0x52, 0xef, 0xa5, 0x8f, 0xa4, 0x7e, 0x57, 0xb9, 0x5f, 0xda, 0x00,
-    0x18, 0xf0, 0x72, 0x29, 0xd4, 0xfe, 0x90, 0x5a, 0x1f, 0x1a, 0x40, 0xee,
-    0x4e, 0xfa, 0x3e, 0xf3, 0x72, 0x4b, 0xea, 0x44, 0x53, 0x43, 0x53, 0x57,
-    0x9b, 0x02, 0x01, 0x02,
+static unsigned char builtin_der[] = {
+    0x30, 0x82, 0x01, 0x08, 0x02, 0x82, 0x01, 0x01, 0x00, 0xec, 0x02, 0x7b,
+    0x74, 0xc6, 0xd4, 0xb4, 0x89, 0x68, 0xfd, 0xbc, 0xe0, 0x82, 0xae, 0xd6,
+    0xf1, 0x4d, 0x93, 0xaa, 0x47, 0x07, 0x84, 0x3d, 0x86, 0xf8, 0x47, 0xf7,
+    0xdf, 0x08, 0x7b, 0xca, 0x04, 0xa4, 0x72, 0xec, 0x11, 0xe2, 0x38, 0x43,
+    0xb7, 0x94, 0xab, 0xaf, 0xe2, 0x85, 0x59, 0x43, 0x4e, 0x71, 0x85, 0xfe,
+    0x52, 0x0c, 0xe0, 0x1c, 0xb6, 0xc7, 0xb0, 0x1b, 0x06, 0xb3, 0x4d, 0x1b,
+    0x4f, 0xf6, 0x4b, 0x45, 0xbd, 0x1d, 0xb8, 0xe4, 0xa4, 0x48, 0x09, 0x28,
+    0x19, 0xd7, 0xce, 0xb1, 0xe5, 0x9a, 0xc4, 0x94, 0x55, 0xde, 0x4d, 0x86,
+    0x0f, 0x4c, 0x5e, 0x25, 0x51, 0x6c, 0x96, 0xca, 0xfa, 0xe3, 0x01, 0x69,
+    0x82, 0x6c, 0x8f, 0xf5, 0xe7, 0x0e, 0xb7, 0x8e, 0x52, 0xf1, 0xcf, 0x0b,
+    0x67, 0x10, 0xd0, 0xb3, 0x77, 0x79, 0xa4, 0xc1, 0xd0, 0x0f, 0x3f, 0xf5,
+    0x5c, 0x35, 0xf9, 0x46, 0xd2, 0xc7, 0xfb, 0x97, 0x6d, 0xd5, 0xbe, 0xe4,
+    0x8b, 0x5a, 0xf2, 0x88, 0xfa, 0x47, 0xdc, 0xc2, 0x4a, 0x4d, 0x69, 0xd3,
+    0x2a, 0xdf, 0x55, 0x6c, 0x5f, 0x71, 0x11, 0x1e, 0x87, 0x03, 0x68, 0xe1,
+    0xf4, 0x21, 0x06, 0x63, 0xd9, 0x65, 0xd4, 0x0c, 0x4d, 0xa7, 0x1f, 0x15,
+    0x53, 0x3a, 0x50, 0x1a, 0xf5, 0x9b, 0x50, 0x35, 0xe0, 0x16, 0xa1, 0xd7,
+    0xe6, 0xbf, 0xd7, 0xd9, 0xd9, 0x53, 0xe5, 0x8b, 0xf8, 0x7b, 0x45, 0x46,
+    0xb6, 0xac, 0x50, 0x16, 0x46, 0x42, 0xca, 0x76, 0x38, 0x4b, 0x8e, 0x83,
+    0xc6, 0x73, 0x13, 0x9c, 0x03, 0xd1, 0x7a, 0x3d, 0x8d, 0x99, 0x34, 0x10,
+    0x79, 0x67, 0x21, 0x23, 0xf9, 0x6f, 0x48, 0x9a, 0xa6, 0xde, 0xbf, 0x7f,
+    0x9c, 0x16, 0x53, 0xff, 0xf7, 0x20, 0x96, 0xeb, 0x34, 0xcb, 0x5b, 0x85,
+    0x2b, 0x7c, 0x98, 0x00, 0x23, 0x47, 0xce, 0xc2, 0x58, 0x12, 0x86, 0x2c,
+    0x57, 0x02, 0x01, 0x02,
 };
 
- /*
-  * Cached results.
-  */
-static DH *dh_2048 = 0;
+#if OPENSSL_VERSION_PREREQ(3,0)
+
+/* ------------------------------------- 3.0 API */
+
+static EVP_PKEY *dhp = 0;
+
+/* load_builtin - load compile-time FFDHE group */
+
+static void load_builtin(void)
+{
+    EVP_PKEY *tmp = 0;
+    OSSL_DECODER_CTX *d;
+    const unsigned char *endp = builtin_der;
+    size_t  dlen = sizeof(builtin_der);
+
+    d = OSSL_DECODER_CTX_new_for_pkey(&tmp, "DER", NULL, "DH",
+				      OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS,
+				      NULL, NULL);
+    /* Check decode succeeds and consumes all data (final dlen == 0) */
+    if (d && OSSL_DECODER_from_data(d, &endp, &dlen) && tmp && !dlen) {
+	dhp = tmp;
+    } else {
+	EVP_PKEY_free(tmp);
+	msg_warn("error loading compiled-in DH parameters");
+	tls_print_errors();
+    }
+    OSSL_DECODER_CTX_free(d);
+}
 
 /* tls_set_dh_from_file - set Diffie-Hellman parameters from file */
 
 void    tls_set_dh_from_file(const char *path)
 {
-    FILE   *paramfile;
+    FILE   *fp;
+    EVP_PKEY *tmp = 0;
+    OSSL_DECODER_CTX *d;
 
     /*
      * This function is the first to set the DH parameters, but free any
      * prior value just in case the call sequence changes some day.
      */
-    if (dh_2048) {
-	DH_free(dh_2048);
-	dh_2048 = 0;
+    if (dhp) {
+	EVP_PKEY_free(dhp);
+	dhp = 0;
     }
-    if ((paramfile = fopen(path, "r")) != 0) {
-	if ((dh_2048 = PEM_read_DHparams(paramfile, 0, 0, 0)) == 0) {
-	    msg_warn("cannot load DH parameters from file %s"
-		     " -- using compiled-in defaults", path);
-	    tls_print_errors();
-	}
-	(void) fclose(paramfile);		/* 200411 */
-    } else {
-	msg_warn("cannot load DH parameters from file %s: %m"
+    if (strcmp(path, "auto") == 0)
+	return;
+
+    if ((fp = fopen(path, "r")) == 0) {
+	msg_warn("error opening DH parameter file \"%s\": %m"
 		 " -- using compiled-in defaults", path);
+	return;
     }
+    d = OSSL_DECODER_CTX_new_for_pkey(&tmp, "PEM", NULL, "DH",
+				      OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS,
+				      NULL, NULL);
+    if (!d || !OSSL_DECODER_from_fp(d, fp) || !tmp) {
+	msg_warn("error decoding DH parameters from file \"%s\""
+		 " -- using compiled-in defaults", path);
+	tls_print_errors();
+    } else {
+	dhp = tmp;
+    }
+    OSSL_DECODER_CTX_free(d);
+    (void) fclose(fp);
 }
 
 /* tls_tmp_dh - configure FFDHE group */
 
-void    tls_tmp_dh(SSL_CTX *ctx)
+void    tls_tmp_dh(SSL_CTX *ctx, int useauto)
 {
-    if (dh_2048 == 0) {
-	const unsigned char *endp = dh2048_der;
-	DH     *dh = 0;
+    if (!dhp && !useauto)
+	load_builtin();
+    if (!ctx)
+	return;
+    if (dhp) {
+	EVP_PKEY *tmp = EVP_PKEY_dup(dhp);
 
-	if (d2i_DHparams(&dh, &endp, sizeof(dh2048_der))
-	    && sizeof(dh2048_der) == endp - dh2048_der) {
-	    dh_2048 = dh;
-	} else {
-	    DH_free(dh);			/* Unlikely non-zero, but by
-						 * the book */
-	    msg_warn("error loading compiled-in DH parameters");
-	}
+	if (tmp && SSL_CTX_set0_tmp_dh_pkey(ctx, tmp) > 0)
+	    return;
+	EVP_PKEY_free(tmp);
+	msg_warn("error configuring explicit DH parameters");
+	tls_print_errors();
+    } else {
+	if (SSL_CTX_set_dh_auto(ctx, 1) > 0)
+	    return;
+	msg_warn("error configuring auto DH parameters");
+	tls_print_errors();
     }
-    if (ctx != 0 && dh_2048 != 0)
-	SSL_CTX_set_tmp_dh(ctx, dh_2048);
 }
 
-void    tls_auto_eecdh_curves(SSL_CTX *ctx, const char *configured)
+#else					/* OPENSSL_VERSION_PREREQ(3,0) */
+
+/* ------------------------------------- 1.1.1 API */
+
+static DH *dhp = 0;
+
+static void load_builtin(void)
+{
+    DH     *tmp = 0;
+    const unsigned char *endp = builtin_der;
+
+    if (d2i_DHparams(&tmp, &endp, sizeof(builtin_der))
+	&& sizeof(builtin_der) == endp - builtin_der) {
+	dhp = tmp;
+    } else {
+	DH_free(tmp);
+	msg_warn("error loading compiled-in DH parameters");
+	tls_print_errors();
+    }
+}
+
+/* tls_set_dh_from_file - set Diffie-Hellman parameters from file */
+
+void    tls_set_dh_from_file(const char *path)
+{
+    FILE   *fp;
+
+    /*
+     * This function is the first to set the DH parameters, but free any
+     * prior value just in case the call sequence changes some day.
+     */
+    if (dhp) {
+	DH_free(dhp);
+	dhp = 0;
+    }
+
+    /*
+     * Forwards compatibility, support "auto" by using the builtin group when
+     * OpenSSL is < 3.0 and does not support automatic FFDHE group selection.
+     */
+    if (strcmp(path, "auto") == 0)
+	return;
+
+    if ((fp = fopen(path, "r")) == 0) {
+	msg_warn("cannot load DH parameters from file %s: %m"
+		 " -- using compiled-in defaults", path);
+	return;
+    }
+    if ((dhp = PEM_read_DHparams(fp, 0, 0, 0)) == 0) {
+	msg_warn("cannot load DH parameters from file %s"
+		 " -- using compiled-in defaults", path);
+	tls_print_errors();
+    }
+    (void) fclose(fp);
+}
+
+/* tls_tmp_dh - configure FFDHE group */
+
+void    tls_tmp_dh(SSL_CTX *ctx, int useauto)
+{
+    if (!dhp)
+	load_builtin();
+    if (!ctx || !dhp || SSL_CTX_set_tmp_dh(ctx, dhp) > 0)
+	return;
+    msg_warn("error configuring explicit DH parameters");
+    tls_print_errors();
+}
+
+#endif					/* OPENSSL_VERSION_PREREQ(3,0) */
+
+/* ------------------------------------- Common API */
+
+#define AG_STAT_OK	(0)
+#define AG_STAT_NO_GROUP (-1)		/* no usable group, may retry */
+#define AG_STAT_NO_RETRY (-2)		/* other error, don't retry */
+
+static int setup_auto_groups(SSL_CTX *ctx, const char *origin,
+			             const char *eecdh,
+			             const char *ffdhe)
 {
 #ifndef OPENSSL_NO_ECDH
     SSL_CTX *tmpctx;
-    int    *nids;
-    int     space = 5;
-    int     n = 0;
-    int     unknown = 0;
+    BH_TABLE *seen;
     char   *save;
-    char   *curves;
-    char   *curve;
+    char   *groups;
+    char   *group;
+    static VSTRING *names;
 
     if ((tmpctx = SSL_CTX_new(TLS_method())) == 0) {
-	msg_warn("cannot allocate temp SSL_CTX, using default ECDHE curves");
+	msg_warn("cannot allocate temp SSL_CTX");
 	tls_print_errors();
-	return;
+	return (AG_STAT_NO_RETRY);
     }
-    nids = mymalloc(space * sizeof(int));
-    curves = save = mystrdup(configured);
-#define RETURN do { \
+    if (!names)
+	names = vstring_alloc(sizeof DEF_TLS_EECDH_AUTO +
+			      sizeof DEF_TLS_FFDHE_AUTO);
+    VSTRING_RESET(names);
+
+    /*
+     * OpenSSL does not tolerate duplicate groups in the requested list.
+     * Deduplicate case-insensitively, just in case OpenSSL some day supports
+     * case-insensitive group lookup.  Deduplicate only verified extant
+     * groups we're going to ask OpenSSL to use.
+     * 
+     * OpenSSL 3.3 supports "?<name>" as a syntax for optionally ignoring
+     * unsupported groups, so we could skip checking against the throw-away
+     * CTX when linked against 3.3 or higher, but the cost savings don't
+     * justify the #ifdef overhead for now.
+     */
+    seen = been_here_init(0, BH_FLAG_FOLD);
+
+#define GROUPS_SEP CHARS_COMMA_SP ":"
+#define SETUP_AG_RETURN(val) do { \
+	been_here_free(seen); \
 	myfree(save); \
-	myfree(nids); \
 	SSL_CTX_free(tmpctx); \
-	return; \
+	return (val); \
     } while (0)
 
-    while ((curve = mystrtok(&curves, CHARS_COMMA_SP)) != 0) {
-	int     nid = EC_curve_nist2nid(curve);
-
-	if (nid == NID_undef)
-	    nid = OBJ_sn2nid(curve);
-	if (nid == NID_undef)
-	    nid = OBJ_ln2nid(curve);
-	if (nid == NID_undef) {
-	    msg_warn("ignoring unknown ECDHE curve \"%s\"",
-		     curve);
-	    continue;
-	}
+    groups = save = concatenate(eecdh, " ", ffdhe, NULL);
+    if ((group = mystrtok(&groups, GROUPS_SEP)) == 0) {
+	msg_warn("no %s key exchange group - OpenSSL requires at least one",
+		 origin);
+	SETUP_AG_RETURN(AG_STAT_NO_GROUP);
+    }
+    for (; group != 0; group = mystrtok(&groups, GROUPS_SEP)) {
 
 	/*
-	 * Validate the NID by trying it as the sole EC curve for a
-	 * throw-away SSL context.  Silently skip unsupported code points.
-	 * This way, we can list X25519 and X448 as soon as the nids are
-	 * assigned, and before the supporting code is implemented.  They'll
-	 * be silently skipped when not yet supported.
+	 * Validate the group name by trying it as the group for a throw-away
+	 * SSL context. This way, we can ask for new groups that may not yet
+	 * be supported by the underlying OpenSSL runtime.  Unsupported
+	 * groups are silently ignored.
 	 */
-	if (SSL_CTX_set1_curves(tmpctx, &nid, 1) <= 0) {
-	    ++unknown;
-	    continue;
+	ERR_set_mark();
+	if (SSL_CTX_set1_curves_list(tmpctx, group) > 0 &&
+	    !been_here_fixed(seen, group)) {
+	    if (VSTRING_LEN(names) > 0)
+		VSTRING_ADDCH(names, ':');
+	    vstring_strcat(names, group);
 	}
-	if (++n > space) {
-	    space *= 2;
-	    nids = myrealloc(nids, space * sizeof(int));
-	}
-	nids[n - 1] = nid;
+	ERR_pop_to_mark();
     }
 
-    if (n == 0) {
-	if (unknown > 0)
-	    msg_warn("none of the configured ECDHE curves are supported");
-	RETURN;
+    if (VSTRING_LEN(names) == 0) {
+	/* The names may be case-sensitive */
+	msg_warn("none of the %s key exchange groups are supported", origin);
+	SETUP_AG_RETURN(AG_STAT_NO_GROUP);
     }
-    if (SSL_CTX_set1_curves(ctx, nids, n) <= 0) {
-	msg_warn("failed to configure ECDHE curves");
+    VSTRING_TERMINATE(names);
+
+    if (SSL_CTX_set1_curves_list(ctx, vstring_str(names)) <= 0) {
+	msg_warn("failed to set up the %s key exchange groups", origin);
 	tls_print_errors();
-	RETURN;
+	SETUP_AG_RETURN(AG_STAT_NO_RETRY);
     }
-    RETURN;
+    SETUP_AG_RETURN(AG_STAT_OK);
 #endif
+}
+
+void    tls_auto_groups(SSL_CTX *ctx, const char *eecdh, const char *ffdhe)
+{
+    char   *def_eecdh = DEF_TLS_EECDH_AUTO;
+
+#if OPENSSL_VERSION_PREREQ(3, 0)
+    char   *def_ffdhe = DEF_TLS_FFDHE_AUTO;
+
+#else
+    char   *def_ffdhe = "";
+
+    /* Has no effect prior to OpenSSL 3.0 */
+    ffdhe = def_ffdhe;
+#endif
+    const char *origin;
+
+    /* Use OpenSSL defaults */
+    if (!*eecdh && !*ffdhe)
+	return;
+
+    /*
+     * Try the user-specified list first. If that fails (empty list or no
+     * known group name), try again with the Postfix defaults. We assume that
+     * group selection is mere performance tuning and not security critical.
+     * All the groups supported for negotiation should be strong enough.
+     */
+    for (origin = "configured"; /* void */ ; /* void */ ) {
+	switch (setup_auto_groups(ctx, origin, eecdh, ffdhe)) {
+	case AG_STAT_OK:
+	    return;
+	case AG_STAT_NO_GROUP:
+	    if (strcmp(eecdh, def_eecdh) != 0
+		|| strcmp(ffdhe, def_ffdhe) != 0) {
+		msg_warn("using Postfix default key exchange groups instead");
+		origin = "Postfix default";
+		eecdh = def_eecdh;
+		ffdhe = def_ffdhe;
+		break;
+	    }
+	    /* FALLTHROUGH */
+	default:
+	    msg_warn("using OpenSSL default key exchange groups instead");
+	    return;
+	}
+    }
 }
 
 #ifdef TEST
 
 int     main(int unused_argc, char **unused_argv)
 {
-    tls_tmp_dh(0);
-    return (dh_2048 == 0);
+    tls_tmp_dh(0, 0);
+    return (dhp == 0);
 }
 
 #endif

@@ -1,20 +1,31 @@
+./attr_print_plain: send attr protocol = test
 ./attr_print_plain: send attr number = 4711
 ./attr_print_plain: send attr long_number = 1234
+./attr_print_plain: send attr bool = true
 ./attr_print_plain: send attr string = whoopee
 ./attr_print_plain: send attr data = [data 7 bytes]
-./attr_print_plain: send attr name foo-name value foo-value
 ./attr_print_plain: send attr name bar-name value bar-value
+./attr_print_plain: send attr name foo-name value foo-value
 ./attr_print_plain: send attr long_number = 4321
+./attr_print_plain: send attr protocol = test
 ./attr_print_plain: send attr number = 4711
 ./attr_print_plain: send attr long_number = 1234
+./attr_print_plain: send attr bool = false
 ./attr_print_plain: send attr string = whoopee
 ./attr_print_plain: send attr data = [data 7 bytes]
+./attr_print_plain: send attr protocol = not-test
+./attr_scan_plain: unknown_stream: wanted attribute: protocol
+./attr_scan_plain: input attribute name: protocol
+./attr_scan_plain: input attribute value: test
 ./attr_scan_plain: unknown_stream: wanted attribute: number
 ./attr_scan_plain: input attribute name: number
 ./attr_scan_plain: input attribute value: 4711
 ./attr_scan_plain: unknown_stream: wanted attribute: long_number
 ./attr_scan_plain: input attribute name: long_number
 ./attr_scan_plain: input attribute value: 1234
+./attr_scan_plain: unknown_stream: wanted attribute: bool
+./attr_scan_plain: input attribute name: bool
+./attr_scan_plain: input attribute value: true
 ./attr_scan_plain: unknown_stream: wanted attribute: string
 ./attr_scan_plain: input attribute name: string
 ./attr_scan_plain: input attribute value: whoopee
@@ -24,11 +35,11 @@
 ./attr_scan_plain: unknown_stream: wanted attribute: (any attribute name or list terminator)
 ./attr_scan_plain: input attribute name: {
 ./attr_scan_plain: unknown_stream: wanted attribute: (any attribute name or '}')
-./attr_scan_plain: input attribute name: foo-name
-./attr_scan_plain: input attribute value: foo-value
-./attr_scan_plain: unknown_stream: wanted attribute: (any attribute name or '}')
 ./attr_scan_plain: input attribute name: bar-name
 ./attr_scan_plain: input attribute value: bar-value
+./attr_scan_plain: unknown_stream: wanted attribute: (any attribute name or '}')
+./attr_scan_plain: input attribute name: foo-name
+./attr_scan_plain: input attribute value: foo-value
 ./attr_scan_plain: unknown_stream: wanted attribute: (any attribute name or '}')
 ./attr_scan_plain: input attribute name: }
 ./attr_scan_plain: unknown_stream: wanted attribute: long_number
@@ -36,12 +47,18 @@
 ./attr_scan_plain: input attribute value: 4321
 ./attr_scan_plain: unknown_stream: wanted attribute: (list terminator)
 ./attr_scan_plain: input attribute name: (end)
+./attr_scan_plain: unknown_stream: wanted attribute: protocol
+./attr_scan_plain: input attribute name: protocol
+./attr_scan_plain: input attribute value: test
 ./attr_scan_plain: unknown_stream: wanted attribute: number
 ./attr_scan_plain: input attribute name: number
 ./attr_scan_plain: input attribute value: 4711
 ./attr_scan_plain: unknown_stream: wanted attribute: long_number
 ./attr_scan_plain: input attribute name: long_number
 ./attr_scan_plain: input attribute value: 1234
+./attr_scan_plain: unknown_stream: wanted attribute: bool
+./attr_scan_plain: input attribute name: bool
+./attr_scan_plain: input attribute value: false
 ./attr_scan_plain: unknown_stream: wanted attribute: string
 ./attr_scan_plain: input attribute name: string
 ./attr_scan_plain: input attribute value: whoopee
@@ -50,16 +67,23 @@
 ./attr_scan_plain: input attribute value: d2hvb3BlZQ==
 ./attr_scan_plain: unknown_stream: wanted attribute: (list terminator)
 ./attr_scan_plain: input attribute name: (end)
+./attr_scan_plain: unknown_stream: wanted attribute: protocol
+./attr_scan_plain: input attribute name: protocol
+./attr_scan_plain: input attribute value: not-test
+./attr_scan_plain: warning: unexpected protocol not-test from unknown_stream (expected: test)
 number 4711
 long_number 1234
+bool true
 string whoopee
 data whoopee
-(hash) foo-name foo-value
 (hash) bar-name bar-value
+(hash) foo-name foo-value
 long_number 4321
 number 4711
 long_number 1234
+bool false
 string whoopee
 data whoopee
-(hash) foo-name foo-value
 (hash) bar-name bar-value
+(hash) foo-name foo-value
+return: -1

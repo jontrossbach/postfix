@@ -33,22 +33,8 @@ update: ../../bin/$(PROG)
 ../../bin/$(PROG): $(PROG)
 	cp $(PROG) ../../bin
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-shar:
-	@shar $(FILES)
-
-lint:
-	lint $(SRCS)
-
 clean:
 	rm -f *.o *core $(PROG) $(TESTPROG) junk
-	rm -rf printfck
 
 tidy:	clean
 
@@ -65,6 +51,7 @@ depend: $(MAKES)
 postfix.o: ../../include/argv.h
 postfix.o: ../../include/check_arg.h
 postfix.o: ../../include/clean_env.h
+postfix.o: ../../include/compat_level.h
 postfix.o: ../../include/mail_conf.h
 postfix.o: ../../include/mail_params.h
 postfix.o: ../../include/mail_parm_split.h

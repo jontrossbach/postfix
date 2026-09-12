@@ -191,7 +191,7 @@
 /* .IP \fBunix:\fR\fIpathname\fR
 /*	Listen on the UNIX-domain socket at \fIpathname\fR.
 /* .IP \fIbacklog\fR
-/*	The maximum length the queue of pending connections,
+/*	The maximum length of the queue of pending connections,
 /*	as defined by the \fBlisten\fR(2) system call.
 /* DUMP FILE FORMAT
 /* .ad
@@ -392,7 +392,7 @@ static char *single_template;		/* individual template */
 static char *shared_template;		/* shared template */
 static VSTRING *start_string;		/* dump content prefix */
 
-static INET_PROTO_INFO *proto_info;
+static const INET_PROTO_INFO *proto_info;
 
 #define STR(x)	vstring_str(x)
 

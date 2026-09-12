@@ -62,8 +62,8 @@
 /*	available as:
 /* .IP TLScontext->peer_status
 /*	A bitmask field that records the status of the peer certificate
-/*	verification. One or more of TLS_CERT_FLAG_PRESENT and
-/*	TLS_CERT_FLAG_TRUSTED.
+/*	verification. One or more of TLS_CRED_FLAG_CERT, TLS_CRED_FLAG_RPK
+/*	and TLS_CERT_FLAG_TRUSTED.
 /* .IP TLScontext->peer_CN
 /*	Extracted CommonName of the peer, or zero-length string
 /*	when information could not be extracted.
@@ -151,6 +151,9 @@
 #include <tls_mgr.h>
 #define TLS_INTERNAL
 #include <tls.h>
+#if OPENSSL_VERSION_PREREQ(3,0)
+#include <openssl/core_names.h>		/* EVP_MAC parameters */
+#endif
 
 #define STR(x)	vstring_str(x)
 #define LEN(x)	VSTRING_LEN(x)
@@ -158,11 +161,20 @@
 /* Application-specific. */
 
  /*
-  * The session_id_context indentifies the service that created a session.
+  * The session_id_context identifies the service that created a session.
   * This information is used to distinguish between multiple TLS-based
   * servers running on the same server. We use the name of the mail system.
   */
 static const char server_session_id_context[] = "Postfix/TLS";
+
+#ifndef OPENSSL_NO_TLSEXT
+
+ /*
+  * We retain the cipher handle for the lifetime of the process.
+  */
+static const EVP_CIPHER *tkt_cipher;
+
+#endif
 
 #define GET_SID(s, v, lptr)	((v) = SSL_SESSION_get_id((s), (lptr)))
 
@@ -290,21 +302,62 @@ static int new_server_session_cb(SSL *ssl, SSL_SESSION *session)
 #define TLS_TKT_ACCEPT	1		/* Ticket decryptable and re-usable */
 #define TLS_TKT_REISSUE	2		/* Ticket decryptable, not re-usable */
 
+#if !defined(OPENSSL_NO_TLSEXT)
+
+#if OPENSSL_VERSION_PREREQ(3,0)
+
 /* ticket_cb - configure tls session ticket encrypt/decrypt context */
 
-#if defined(SSL_OP_NO_TICKET) && !defined(OPENSSL_NO_TLSEXT)
+static int ticket_cb(SSL *con, unsigned char name[], unsigned char iv[],
+		         EVP_CIPHER_CTX *ctx, EVP_MAC_CTX *hctx, int create)
+{
+    OSSL_PARAM params[3];
+    TLS_TICKET_KEY *key;
+    TLS_SESS_STATE *TLScontext = SSL_get_ex_data(con, TLScontext_index);
+    int     timeout = ((int) SSL_CTX_get_timeout(SSL_get_SSL_CTX(con))) / 2;
+
+    if ((key = tls_mgr_key(create ? 0 : name, timeout)) == 0
+	|| (create && RAND_bytes(iv, TLS_TICKET_IVLEN) <= 0))
+	return (create ? TLS_TKT_NOKEYS : TLS_TKT_STALE);
+
+    params[0] = OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,
+						 LN_sha256, 0);
+    params[1] = OSSL_PARAM_construct_octet_string(OSSL_MAC_PARAM_KEY,
+						  (char *) key->hmac,
+						  TLS_TICKET_MACLEN);
+    params[2] = OSSL_PARAM_construct_end();
+    if (!EVP_MAC_CTX_set_params(hctx, params))
+	return (create ? TLS_TKT_NOKEYS : TLS_TKT_STALE);
+
+    if (create) {
+	EVP_EncryptInit_ex(ctx, tkt_cipher, NOENGINE, key->bits, iv);
+	memcpy((void *) name, (void *) key->name, TLS_TICKET_NAMELEN);
+	if (TLScontext->log_mask & TLS_LOG_CACHE)
+	    msg_info("%s: Issuing session ticket, key expiration: %ld",
+		     TLScontext->namaddr, (long) key->tout);
+    } else {
+	EVP_DecryptInit_ex(ctx, tkt_cipher, NOENGINE, key->bits, iv);
+	if (TLScontext->log_mask & TLS_LOG_CACHE)
+	    msg_info("%s: Decrypting session ticket, key expiration: %ld",
+		     TLScontext->namaddr, (long) key->tout);
+	TLScontext->ticketed = 1;
+    }
+    return (TLS_TKT_ACCEPT);
+}
+
+#else					/* OPENSSL_VERSION_PREREQ(3,0) */
+
+/* ticket_cb - configure tls session ticket encrypt/decrypt context */
 
 static int ticket_cb(SSL *con, unsigned char name[], unsigned char iv[],
-		          EVP_CIPHER_CTX * ctx, HMAC_CTX * hctx, int create)
+		             EVP_CIPHER_CTX *ctx, HMAC_CTX *hctx, int create)
 {
     static const EVP_MD *sha256;
-    static const EVP_CIPHER *ciph;
     TLS_TICKET_KEY *key;
     TLS_SESS_STATE *TLScontext = SSL_get_ex_data(con, TLScontext_index);
     int     timeout = ((int) SSL_CTX_get_timeout(SSL_get_SSL_CTX(con))) / 2;
 
     if ((!sha256 && (sha256 = EVP_sha256()) == 0)
-	|| (!ciph && (ciph = EVP_get_cipherbyname(var_tls_tkt_cipher)) == 0)
 	|| (key = tls_mgr_key(create ? 0 : name, timeout)) == 0
 	|| (create && RAND_bytes(iv, TLS_TICKET_IVLEN) <= 0))
 	return (create ? TLS_TKT_NOKEYS : TLS_TKT_STALE);
@@ -312,30 +365,66 @@ static int ticket_cb(SSL *con, unsigned char name[], unsigned char iv[],
     HMAC_Init_ex(hctx, key->hmac, TLS_TICKET_MACLEN, sha256, NOENGINE);
 
     if (create) {
-	EVP_EncryptInit_ex(ctx, ciph, NOENGINE, key->bits, iv);
+	EVP_EncryptInit_ex(ctx, tkt_cipher, NOENGINE, key->bits, iv);
 	memcpy((void *) name, (void *) key->name, TLS_TICKET_NAMELEN);
 	if (TLScontext->log_mask & TLS_LOG_CACHE)
 	    msg_info("%s: Issuing session ticket, key expiration: %ld",
 		     TLScontext->namaddr, (long) key->tout);
     } else {
-	EVP_DecryptInit_ex(ctx, ciph, NOENGINE, key->bits, iv);
+	EVP_DecryptInit_ex(ctx, tkt_cipher, NOENGINE, key->bits, iv);
 	if (TLScontext->log_mask & TLS_LOG_CACHE)
 	    msg_info("%s: Decrypting session ticket, key expiration: %ld",
 		     TLScontext->namaddr, (long) key->tout);
+	TLScontext->ticketed = 1;
     }
-    TLScontext->ticketed = 1;
     return (TLS_TKT_ACCEPT);
 }
 
-#endif
+#endif					/* OPENSSL_VERSION_PREREQ(3,0) */
+
+#endif					/* defined(SSL_OP_NO_TICKET) &&
+					 * !defined(OPENSSL_NO_TLSEXT) */
+
+/* Accept use of TLS server-only certificates by TLS clients */
+
+static int trust_server_ccerts(X509_STORE_CTX *ctx, void *unused)
+{
+    const X509 *x;
+    EXTENDED_KEY_USAGE *xku;
+    int     i, usages = 0;
+
+    if ((x = X509_STORE_CTX_get0_cert(ctx)) == NULL
+      || (xku = X509_get_ext_d2i(x, NID_ext_key_usage, NULL, NULL)) == NULL)
+	return X509_verify_cert(ctx);
+
+    for (i = 0; i < sk_ASN1_OBJECT_num(xku); i++) {
+	switch (OBJ_obj2nid(sk_ASN1_OBJECT_value(xku, i))) {
+	case NID_server_auth:
+	    usages |= XKU_SSL_SERVER;
+	    break;
+	case NID_client_auth:
+	    usages |= XKU_SSL_CLIENT;
+	    break;
+	default:
+	    break;
+	}
+    }
+    sk_ASN1_OBJECT_pop_free(xku, ASN1_OBJECT_free);
+
+    if (usages == XKU_SSL_SERVER) {
+	X509_VERIFY_PARAM *params = X509_STORE_CTX_get0_param(ctx);
+
+	X509_VERIFY_PARAM_set_purpose(params, X509_PURPOSE_SSL_SERVER);
+	X509_VERIFY_PARAM_set_trust(params, X509_TRUST_SSL_SERVER);
+    }
+    return X509_verify_cert(ctx);
+}
 
 /* tls_server_init - initialize the server-side TLS engine */
 
 TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 {
     SSL_CTX *server_ctx;
-    SSL_CTX *sni_ctx;
-    X509_STORE *cert_store;
     long    off = 0;
     int     verify_flags = SSL_VERIFY_NONE;
     int     cachable;
@@ -364,6 +453,13 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
      * Detect mismatch between compile-time headers and run-time library.
      */
     tls_check_version();
+
+    /*
+     * Initialize the OpenSSL library, possibly loading its configuration
+     * file.
+     */
+    if (tls_library_init() == 0)
+	return (0);
 
     /*
      * First validate the protocols. If these are invalid, we can't continue.
@@ -426,24 +522,15 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 	tls_print_errors();
 	return (0);
     }
-    sni_ctx = SSL_CTX_new(TLS_server_method());
-    if (sni_ctx == 0) {
-	SSL_CTX_free(server_ctx);
-	msg_warn("cannot allocate server SNI SSL_CTX: disabling TLS support");
-	tls_print_errors();
-	return (0);
-    }
 #ifdef SSL_SECOP_PEER
     /* Backwards compatible security as a base for opportunistic TLS. */
     SSL_CTX_set_security_level(server_ctx, 0);
-    SSL_CTX_set_security_level(sni_ctx, 0);
 #endif
 
     /*
      * See the verify callback in tls_verify.c
      */
     SSL_CTX_set_verify_depth(server_ctx, props->verifydepth + 1);
-    SSL_CTX_set_verify_depth(sni_ctx, props->verifydepth + 1);
 
     /*
      * The session cache is implemented by the tlsmgr(8) server.
@@ -462,6 +549,15 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 	cachable = 0;
 
     /*
+     * Presently we use TLS only with SMTP where truncation attacks are not
+     * possible as a result of application framing.  If we ever use TLS in
+     * some other application protocol where truncation could be relevant,
+     * we'd need to disable truncation detection conditionally, or explicitly
+     * clear the option in that code path.
+     */
+    off |= SSL_OP_IGNORE_UNEXPECTED_EOF;
+
+    /*
      * Protocol work-arounds, OpenSSL version dependent.
      */
     off |= tls_bug_bits();
@@ -470,25 +566,31 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
      * Add SSL_OP_NO_TICKET when the timeout is zero or library support is
      * incomplete.
      */
-#ifdef SSL_OP_NO_TICKET
 #ifndef OPENSSL_NO_TLSEXT
     ticketable = (*var_tls_tkt_cipher && scache_timeout > 0
 		  && !(off & SSL_OP_NO_TICKET));
     if (ticketable) {
-	const EVP_CIPHER *ciph;
-
-	if ((ciph = EVP_get_cipherbyname(var_tls_tkt_cipher)) == 0
-	    || EVP_CIPHER_mode(ciph) != EVP_CIPH_CBC_MODE
-	    || EVP_CIPHER_iv_length(ciph) != TLS_TICKET_IVLEN
-	    || EVP_CIPHER_key_length(ciph) < TLS_TICKET_IVLEN
-	    || EVP_CIPHER_key_length(ciph) > TLS_TICKET_KEYLEN) {
+#if OPENSSL_VERSION_PREREQ(3,0)
+	tkt_cipher = EVP_CIPHER_fetch(NULL, var_tls_tkt_cipher, NULL);
+#else
+	tkt_cipher = EVP_get_cipherbyname(var_tls_tkt_cipher);
+#endif
+	if (tkt_cipher == 0
+	    || EVP_CIPHER_mode(tkt_cipher) != EVP_CIPH_CBC_MODE
+	    || EVP_CIPHER_iv_length(tkt_cipher) != TLS_TICKET_IVLEN
+	    || EVP_CIPHER_key_length(tkt_cipher) < TLS_TICKET_IVLEN
+	    || EVP_CIPHER_key_length(tkt_cipher) > TLS_TICKET_KEYLEN) {
 	    msg_warn("%s: invalid value: %s; session tickets disabled",
 		     VAR_TLS_TKT_CIPHER, var_tls_tkt_cipher);
 	    ticketable = 0;
 	}
     }
     if (ticketable) {
+#if OPENSSL_VERSION_PREREQ(3,0)
+	SSL_CTX_set_tlsext_ticket_key_evp_cb(server_ctx, ticket_cb);
+#else
 	SSL_CTX_set_tlsext_ticket_key_cb(server_ctx, ticket_cb);
+#endif
 
 	/*
 	 * OpenSSL 1.1.1 introduces support for TLS 1.3, which can issue more
@@ -507,7 +609,6 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 #endif
     if (!ticketable)
 	off |= SSL_OP_NO_TICKET;
-#endif
 
     SSL_CTX_set_options(server_ctx, off);
 
@@ -518,8 +619,6 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 	SSL_CTX_set_options(server_ctx, TLS_SSL_OP_PROTOMASK(protomask));
     SSL_CTX_set_min_proto_version(server_ctx, min_proto);
     SSL_CTX_set_max_proto_version(server_ctx, max_proto);
-    SSL_CTX_set_min_proto_version(sni_ctx, min_proto);
-    SSL_CTX_set_max_proto_version(sni_ctx, max_proto);
 
     /*
      * Some sites may want to give the client less rope. On the other hand,
@@ -530,17 +629,11 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
     if (var_tls_preempt_clist)
 	SSL_CTX_set_options(server_ctx, SSL_OP_CIPHER_SERVER_PREFERENCE);
 
-    /* Done with server_ctx options, clone to sni_ctx */
-    SSL_CTX_clear_options(sni_ctx, ~0);
-    SSL_CTX_set_options(sni_ctx, SSL_CTX_get_options(server_ctx));
-
     /*
      * Set the call-back routine to debug handshake progress.
      */
-    if (log_mask & TLS_LOG_DEBUG) {
+    if (log_mask & TLS_LOG_DEBUG)
 	SSL_CTX_set_info_callback(server_ctx, tls_info_callback);
-	SSL_CTX_set_info_callback(sni_ctx, tls_info_callback);
-    }
 
     /*
      * Load the CA public key certificates for both the server cert and for
@@ -557,17 +650,14 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 				    props->CAfile, props->CApath) < 0) {
 	/* tls_set_ca_certificate_info() already logs a warning. */
 	SSL_CTX_free(server_ctx);		/* 200411 */
-	SSL_CTX_free(sni_ctx);
 	return (0);
     }
 
     /*
-     * Upref and share the cert store.  Sadly we can't yet use
-     * SSL_CTX_set1_cert_store(3) which was added in OpenSSL 1.1.0.
+     * Always support server->client raw public keys, if they're good enough
+     * for the client, they're good enough for us.
      */
-    cert_store = SSL_CTX_get_cert_store(server_ctx);
-    X509_STORE_up_ref(cert_store);
-    SSL_CTX_set_cert_store(sni_ctx, cert_store);
+    tls_enable_server_rpk(server_ctx, NULL);
 
     /*
      * Load the server public key certificate and private key from file and
@@ -591,7 +681,6 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 					props->eckey_file) < 0) {
 	/* tls_set_my_certificate_key_info() already logs a warning. */
 	SSL_CTX_free(server_ctx);		/* 200411 */
-	SSL_CTX_free(sni_ctx);
 	return (0);
     }
 
@@ -605,15 +694,15 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
      */
     if (*props->dh1024_param_file != 0)
 	tls_set_dh_from_file(props->dh1024_param_file);
-    tls_tmp_dh(server_ctx);
-    tls_tmp_dh(sni_ctx);
+    tls_tmp_dh(server_ctx, 1);
 
     /*
      * Enable EECDH if available, errors are not fatal, we just keep going
-     * with any remaining key-exchange algorithms.
+     * with any remaining key-exchange algorithms.  With OpenSSL 3.0 and TLS
+     * 1.3, the same applies to the FFDHE groups which become part of a
+     * unified "groups" list.
      */
-    tls_auto_eecdh_curves(server_ctx, var_tls_eecdh_auto);
-    tls_auto_eecdh_curves(sni_ctx, var_tls_eecdh_auto);
+    tls_auto_groups(server_ctx, var_tls_eecdh_auto, var_tls_ffdhe_auto);
 
     /*
      * If we want to check client certificates, we have to indicate it in
@@ -639,8 +728,6 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 	verify_flags = SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE;
     SSL_CTX_set_verify(server_ctx, verify_flags,
 		       tls_verify_certificate_callback);
-    SSL_CTX_set_verify(sni_ctx, verify_flags,
-		       tls_verify_certificate_callback);
     if (props->ask_ccert && *props->CAfile) {
 	STACK_OF(X509_NAME) *calist = SSL_load_client_CA_file(props->CAfile);
 
@@ -651,24 +738,15 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 	    tls_print_errors();
 	}
 	SSL_CTX_set_client_CA_list(server_ctx, calist);
-
-	if (calist != 0 && sk_X509_NAME_num(calist) > 0) {
-	    calist = SSL_dup_CA_list(calist);
-
-	    if (calist == 0) {
-		msg_warn("error duplicating client CA names for SNI");
-		tls_print_errors();
-	    } else {
-		SSL_CTX_set_client_CA_list(sni_ctx, calist);
-	    }
-	}
     }
+    if (props->ask_ccert && var_tls_srvr_ccerts)
+	SSL_CTX_set_cert_verify_callback(server_ctx, trust_server_ccerts, NULL);
 
     /*
      * Initialize our own TLS server handle, before diving into the details
      * of TLS session cache management.
      */
-    app_ctx = tls_alloc_app_context(server_ctx, sni_ctx, log_mask);
+    app_ctx = tls_alloc_app_context(server_ctx, log_mask);
 
     if (cachable || ticketable || props->set_sessid) {
 
@@ -696,6 +774,7 @@ TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *props)
 				       sizeof(server_session_id_context));
 	SSL_CTX_set_session_cache_mode(server_ctx,
 				       SSL_SESS_CACHE_SERVER |
+				       SSL_SESS_CACHE_NO_INTERNAL |
 				       SSL_SESS_CACHE_NO_AUTO_CLEAR);
 	if (cachable) {
 	    app_ctx->cache_type = mystrdup(props->cache_type);
@@ -739,7 +818,17 @@ TLS_SESS_STATE *tls_server_start(const TLS_SERVER_START_PROPS *props)
     TLS_SESS_STATE *TLScontext;
     const char *cipher_list;
     TLS_APPL_STATE *app_ctx = props->ctx;
-    int     log_mask = app_ctx->log_mask;
+    int     log_mask;
+    /* 202607 OpenAI: isolate session tickets by master.cf service name. */ 
+    EVP_MD_CTX *sessid_ctx_md = 0;
+    unsigned char sessid_ctx[EVP_MAX_MD_SIZE];
+    unsigned int sessid_ctx_len;
+    static const char sessid_ctx_label[] = "Postfix/TLS serverid";
+
+    /*
+     * Convert user loglevel to internal logmask.
+     */
+    log_mask = tls_log_mask(props->log_param, props->log_level);
 
     /*
      * Implicitly enable logging of trust chain errors when verified certs
@@ -766,6 +855,17 @@ TLS_SESS_STATE *tls_server_start(const TLS_SERVER_START_PROPS *props)
 	tls_free_context(TLScontext);
 	return (0);
     }
+
+    /*
+     * Set the call-back routine for verbose logging.
+     * 
+     * Log_mask-dependent behavior should be consistent whether it is specified
+     * globally in tls_server_init(), or per-connection in
+     * tls_server_start().
+     */
+    if (log_mask & TLS_LOG_DEBUG)
+	SSL_set_info_callback(TLScontext->con, tls_info_callback);
+
     cipher_list = tls_set_ciphers(TLScontext, props->cipher_grade,
 				  props->cipher_exclusions);
     if (cipher_list == 0) {
@@ -781,17 +881,51 @@ TLS_SESS_STATE *tls_server_start(const TLS_SERVER_START_PROPS *props)
     TLScontext->stream = props->stream;
     TLScontext->mdalg = props->mdalg;
 
+    /*
+     * The serverid already partitions stateful sessions in the tlsmgr
+     * session cache. Apply the same partition to stateless sessions; all
+     * services in one Postfix instance share the tlsmgr ticket keys.
+     */
+    if (tls_digest_byname(LN_sha256, &sessid_ctx_md) == 0
+	|| EVP_DigestUpdate(sessid_ctx_md, sessid_ctx_label,
+			    sizeof(sessid_ctx_label)) != 1
+	|| EVP_DigestUpdate(sessid_ctx_md, props->serverid,
+			    strlen(props->serverid) + 1) != 1
+	|| EVP_DigestFinal_ex(sessid_ctx_md, sessid_ctx, &sessid_ctx_len) != 1
+	|| sessid_ctx_len > SSL_MAX_SID_CTX_LENGTH
+	|| SSL_set_session_id_context(TLScontext->con, sessid_ctx,
+				      sessid_ctx_len) != 1) {
+	msg_warn("Could not set TLS session ID context");
+	tls_print_errors();
+	if (sessid_ctx_md)
+	    EVP_MD_CTX_destroy(sessid_ctx_md);
+	tls_free_context(TLScontext);
+	return (0);
+    }
+    EVP_MD_CTX_destroy(sessid_ctx_md);
+
     if (!SSL_set_ex_data(TLScontext->con, TLScontext_index, TLScontext)) {
 	msg_warn("Could not set application data for 'TLScontext->con'");
 	tls_print_errors();
 	tls_free_context(TLScontext);
 	return (0);
     }
-#ifdef SSL_SECOP_PEER
-    /* When authenticating the peer, use 80-bit plus OpenSSL security level */
+    /* Configure the SNI-based certificate selection callback */
+    SSL_set_cert_cb(TLScontext->con, tls_cert_cb, TLScontext);
+
+    /*
+     * When encryption is mandatory use the 80-bit plus OpenSSL security
+     * level.
+     */
     if (props->requirecert)
 	SSL_set_security_level(TLScontext->con, 1);
-#endif
+
+    /*
+     * Also enable client->server raw public keys, provided we're not
+     * interested in client certificate fingerprints.
+     */
+    if (props->enable_rpk)
+	tls_enable_client_rpk(NULL, TLScontext->con);
 
     /*
      * Before really starting anything, try to seed the PRNG a little bit
@@ -822,7 +956,39 @@ TLS_SESS_STATE *tls_server_start(const TLS_SERVER_START_PROPS *props)
      * created for us, so we can use it for debugging purposes.
      */
     if (log_mask & TLS_LOG_TLSPKTS)
-	BIO_set_callback(SSL_get_rbio(TLScontext->con), tls_bio_dump_cb);
+	tls_set_bio_callback(SSL_get_rbio(TLScontext->con), tls_bio_dump_cb);
+
+#ifdef HAVE_SSL_TRACE
+
+    /*
+     * If "trace" is included in the TLS loglevel, open a destination BIO
+     * (either the application's override or the libtls default file under
+     * $queue_directory/tlstrace/) and install the SSL message callback.
+     * SSL_trace() writes records straight into the BIO; the budget is
+     * enforced via BIO_tell() in tls_msg_callback(). Enforce a global trace
+     * creation rate limit for requests from a daemon process.
+     */
+    if ((log_mask & TLS_LOG_TRACE) && props->trace_size_limit > 0) {
+	BIO    *bio;
+
+	if (props->trace_open != 0) {
+	    bio = props->trace_open(props->trace_arg, props->trace_peer);
+	} else if (tls_trace_rate_ok(var_tls_trace_anvil_rate)) {
+	    bio = tls_trace_create_qfile(props->trace_peer);
+	} else {
+	    msg_info("skipping TLS trace output - rate limit (%d) exceeded",
+		     var_tls_trace_anvil_rate);
+	    bio = 0;
+	}
+
+	if (bio != 0) {
+	    TLScontext->trace_bio = bio;
+	    TLScontext->trace_size_limit = props->trace_size_limit;
+	    SSL_set_msg_callback(TLScontext->con, tls_msg_callback);
+	    SSL_set_msg_callback_arg(TLScontext->con, TLScontext);
+	}
+    }
+#endif
 
     /*
      * If we don't trigger the handshake in the library, leave control over
@@ -868,11 +1034,12 @@ TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *TLScontext)
 {
     const SSL_CIPHER *cipher;
     X509   *peer;
+    EVP_PKEY *pkey = 0;
     char    buf[CCERT_BUFSIZ];
 
     /* Turn off packet dump if only dumping the handshake */
     if ((TLScontext->log_mask & TLS_LOG_ALLPKTS) == 0)
-	BIO_set_callback(SSL_get_rbio(TLScontext->con), 0);
+	tls_set_bio_callback(SSL_get_rbio(TLScontext->con), 0);
 
     /*
      * The caller may want to know if this session was reused or if a new
@@ -887,9 +1054,18 @@ TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *TLScontext)
      * Let's see whether a peer certificate is available and what is the
      * actual information. We want to save it for later use.
      */
-    peer = SSL_get_peer_certificate(TLScontext->con);
+    peer = TLS_PEEK_PEER_CERT(TLScontext->con);
+    if (peer) {
+	pkey = X509_get0_pubkey(peer);
+    }
+#if OPENSSL_VERSION_PREREQ(3,2)
+    else {
+	pkey = SSL_get0_peer_rpk(TLScontext->con);
+    }
+#endif
+
     if (peer != NULL) {
-	TLScontext->peer_status |= TLS_CERT_FLAG_PRESENT;
+	TLScontext->peer_status |= TLS_CRED_FLAG_CERT;
 	if (SSL_get_verify_result(TLScontext->con) == X509_V_OK)
 	    TLScontext->peer_status |= TLS_CERT_FLAG_TRUSTED;
 
@@ -903,18 +1079,25 @@ TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *TLScontext)
 	}
 	TLScontext->peer_CN = tls_peer_CN(peer, TLScontext);
 	TLScontext->issuer_CN = tls_issuer_CN(peer, TLScontext);
-	TLScontext->peer_cert_fprint = tls_cert_fprint(peer, TLScontext->mdalg);
-	TLScontext->peer_pkey_fprint = tls_pkey_fprint(peer, TLScontext->mdalg);
+	TLScontext->peer_cert_fprint =
+	    tls_cert_fprint(peer, TLScontext->mdalg);
+	TLScontext->peer_pkey_fprint =
+	    tls_pkey_fprint(pkey, TLScontext->mdalg);
 
 	if (TLScontext->log_mask & (TLS_LOG_VERBOSE | TLS_LOG_PEERCERT)) {
-	    msg_info("%s: subject_CN=%s, issuer=%s, fingerprint=%s"
-		     ", pkey_fingerprint=%s",
+	    msg_info("%s: subject_CN=%s, issuer=%s%s%s%s%s",
 		     TLScontext->namaddr,
 		     TLScontext->peer_CN, TLScontext->issuer_CN,
-		     TLScontext->peer_cert_fprint,
-		     TLScontext->peer_pkey_fprint);
+		     *TLScontext->peer_cert_fprint ?
+		     ", cert fingerprint=" : "",
+		     *TLScontext->peer_cert_fprint ?
+		     TLScontext->peer_cert_fprint : "",
+		     *TLScontext->peer_pkey_fprint ?
+		     ", pkey fingerprint=" : "",
+		     *TLScontext->peer_pkey_fprint ?
+		     TLScontext->peer_pkey_fprint : "");
 	}
-	X509_free(peer);
+	TLS_FREE_PEER_CERT(peer);
 
 	/*
 	 * Give them a clue. Problems with trust chain verification are
@@ -925,7 +1108,7 @@ TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *TLScontext)
 	if (!TLS_CERT_IS_TRUSTED(TLScontext)
 	    && (TLScontext->log_mask & TLS_LOG_UNTRUSTED)) {
 	    if (TLScontext->session_reused == 0)
-		tls_log_verify_error(TLScontext);
+		tls_log_verify_error(TLScontext, (struct TLSRPT_WRAPPER *) 0);
 	    else
 		msg_info("%s: re-using session with untrusted certificate, "
 			 "look for details earlier in the log",
@@ -935,7 +1118,22 @@ TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *TLScontext)
 	TLScontext->peer_CN = mystrdup("");
 	TLScontext->issuer_CN = mystrdup("");
 	TLScontext->peer_cert_fprint = mystrdup("");
-	TLScontext->peer_pkey_fprint = mystrdup("");
+	if (!pkey) {
+	    TLScontext->peer_pkey_fprint = mystrdup("");
+	} else {
+
+	    /*
+	     * Raw public keys don't involve CA trust, and we don't have a
+	     * way to associate DANE TLSA RRs with clients just yet, we just
+	     * make the fingerprint available to the access(5) layer.
+	     */
+	    TLScontext->peer_status |= TLS_CRED_FLAG_RPK;
+	    TLScontext->peer_pkey_fprint =
+		tls_pkey_fprint(pkey, TLScontext->mdalg);
+	    if (TLScontext->log_mask & (TLS_LOG_VERBOSE | TLS_LOG_PEERCERT))
+		msg_info("%s: raw public key fingerprint=%s",
+			 TLScontext->namaddr, TLScontext->peer_pkey_fprint);
+	}
     }
 
     /*

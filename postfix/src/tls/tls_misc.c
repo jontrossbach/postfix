@@ -4,9 +4,7 @@
 /* SUMMARY
 /*	miscellaneous TLS support routines
 /* SYNOPSIS
-/* .SH Public functions
-/* .nf
-/* .na
+/* Public functions
 /*	#include <tls.h>
 /*
 /*	void tls_log_summary(role, usage, TLScontext)
@@ -23,31 +21,30 @@
 /*	void	tls_pre_jail_init(TLS_ROLE)
 /*	TLS_ROLE role;
 /*
-/* .SH Internal functions
-/* .nf
-/* .na
+/* Internal functions
 /*	#define TLS_INTERNAL
 /*	#include <tls.h>
 /*
+/*	char	*var_tls_cnf_file;
+/*	char	*var_tls_cnf_name;
 /*	char	*var_tls_high_clist;
 /*	char	*var_tls_medium_clist;
-/*	char	*var_tls_low_clist;
-/*	char	*var_tls_export_clist;
 /*	char	*var_tls_null_clist;
 /*	char	*var_tls_eecdh_auto;
 /*	char	*var_tls_eecdh_strong;
 /*	char	*var_tls_eecdh_ultra;
+/*	char	*var_tls_ffdhe_auto;
 /*	char	*var_tls_dane_digests;
 /*	int	var_tls_daemon_rand_bytes;
 /*	bool	var_tls_append_def_CA;
 /*	bool	var_tls_preempt_clist;
-/*	bool	var_tls_bc_pkey_fprint;
 /*	bool	var_tls_multi_wildcard;
 /*	char	*var_tls_mgr_service;
 /*	char	*var_tls_tkt_cipher;
 /*	char	*var_openssl_path;
 /*	char	*var_tls_server_sni_maps;
 /*	bool	var_tls_fast_shutdown;
+/*	bool	var_tls_srvr_ccerts;
 /*
 /*	TLS_APPL_STATE *tls_alloc_app_context(ssl_ctx, log_mask)
 /*	SSL_CTX	*ssl_ctx;
@@ -68,6 +65,8 @@
 /*	long	tls_bug_bits()
 /*
 /*	void	tls_param_init()
+/*
+/*	int     tls_library_init(void)
 /*
 /*	int	tls_proto_mask_lims(plist, floor, ceiling)
 /*	const char *plist;
@@ -95,13 +94,15 @@
 /*	int	where;
 /*	int	ret;
 /*
-/*	long	tls_bio_dump_cb(bio, cmd, argp, argi, argl, ret)
+/*	long	tls_bio_dump_cb(bio, cmd, argp, len, argi, argl, ret, processed)
 /*	BIO	*bio;
 /*	int	cmd;
 /*	const char *argp;
+/*	size_t	len;
 /*	int	argi;
 /*	long	argl; /* unused */
-/*	long	ret;
+/*	int	ret;
+/*	size_t	*processed;
 /*
 /*	int	tls_log_mask(log_param, log_level)
 /*	const char *log_param;
@@ -113,6 +114,22 @@
 /*
 /*	const EVP_MD *tls_validate_digest(dgst)
 /*	const char *dgst;
+/*
+/*	void tls_enable_client_rpk(ctx, ssl)
+/*	SSL_CTX *ctx;
+/*	SSL     *ssl;
+/*
+/*	void tls_enable_server_rpk(ctx, ssl)
+/*	SSL_CTX *ctx;
+/*	SSL     *ssl;
+/*
+/*	bool	tls_trace_rate_ok(int tls_trace_rate_limit)
+/*
+/*	BIO	*tls_trace_create_file(
+/*	VSTRING *path,
+/*	const char *trace_peer)
+/*
+/*	BIO	*tls_trace_create_qfile(const char *trace_peer)
 /* DESCRIPTION
 /*	This module implements public and internal routines that
 /*	support the TLS client and server.
@@ -155,6 +172,9 @@
 /*	tls_param_init() loads main.cf parameters used internally in
 /*	TLS library. Any errors are fatal.
 /*
+/*	tls_library_init() initializes the OpenSSL library, optionally
+/*	loading an OpenSSL configuration file.
+/*
 /*	tls_pre_jail_init() opens any tables that need to be opened before
 /*	entering a chroot jail. The "role" parameter must be TLS_ROLE_CLIENT
 /*	for clients and TLS_ROLE_SERVER for servers. Any errors are fatal.
@@ -166,11 +186,10 @@
 /*	contains invalid protocol names, TLS_PROTOCOL_INVALID is returned and
 /*	no warning is logged.
 /*
-/*	tls_cipher_grade() converts a case-insensitive cipher grade
-/*	name (high, medium, low, export, null) to the corresponding
-/*	TLS_CIPHER_ constant.  When the input specifies an unrecognized
-/*	grade, tls_cipher_grade() logs no warning, and returns
-/*	TLS_CIPHER_NONE.
+/*	tls_cipher_grade() converts a case-insensitive cipher grade name (high,
+/*	medium, null) to the corresponding TLS_CIPHER_ constant.  When the
+/*	input specifies an unrecognized grade, tls_cipher_grade() logs no
+/*	warning, and returns TLS_CIPHER_NONE.
 /*
 /*	str_tls_cipher_grade() converts a cipher grade to a name.
 /*	When the input specifies an undefined grade, str_tls_cipher_grade()
@@ -208,6 +227,26 @@
 /*
 /*	tls_validate_digest() returns a static handle for the named
 /*	digest algorithm, or NULL on error.
+/*
+/*	tls_enable_client_rpk() enables the use of raw public keys in the
+/*	client to server direction, if supported by the OpenSSL library.
+/*
+/*	tls_enable_server_rpk() enables the use of raw public keys in the
+/*	server to client direction, if supported by the OpenSSL library.
+/*
+/*	tls_trace_create_file() fills in a TLS trace file name template
+/*	<process_name>-<date_time>.<usec>-<trace_peer>-XXXXXX, appends
+/*	the result to the path argument, opens the named file with
+/*	mkstemp(), and returns it as a file BIO with BIO_CLOSE
+/*	enabled. The result value is null in case of failure; all errors
+/*	are logged.
+/*
+/*	tls_trace_rate_ok() queries the anvil(8) service and enforces the
+/*	tls_trace_rate_limit value.
+/*
+/*	tls_trace_create_qfile() creates a TLS trace file for a daemon
+/*	process. This function initializes a path buffer with "tlstrace/",
+/*	and delegates the remaining work to tls_trace_create_file().
 /* LICENSE
 /* .ad
 /* .fi
@@ -242,6 +281,8 @@
 #include <sys_defs.h>
 #include <ctype.h>
 #include <string.h>
+#include <fcntl.h>			/* O_WRONLY etc. */
+#include <time.h>
 
 /* Utility library. */
 
@@ -259,6 +300,8 @@
  /*
   * Global library.
   */
+#include <anvil_clnt.h>
+#include <been_here.h>
 #include <mail_params.h>
 #include <mail_conf.h>
 #include <maps.h>
@@ -274,20 +317,23 @@
  /*
   * Tunable parameters.
   */
+char   *var_tls_cnf_file;
+char   *var_tls_cnf_name;
 char   *var_tls_high_clist;
 char   *var_tls_medium_clist;
-char   *var_tls_low_clist;
-char   *var_tls_export_clist;
+char   *var_tls_low_ignored;
+char   *var_tls_export_ignored;
 char   *var_tls_null_clist;
 int     var_tls_daemon_rand_bytes;
+int     var_tls_trace_anvil_rate;
 char   *var_tls_eecdh_auto;
 char   *var_tls_eecdh_strong;
 char   *var_tls_eecdh_ultra;
+char   *var_tls_ffdhe_auto;
 char   *var_tls_dane_digests;
 bool    var_tls_append_def_CA;
 char   *var_tls_bug_tweaks;
 char   *var_tls_ssl_options;
-bool    var_tls_bc_pkey_fprint;
 bool    var_tls_multi_wildcard;
 char   *var_tls_mgr_service;
 char   *var_tls_tkt_cipher;
@@ -295,6 +341,7 @@ char   *var_openssl_path;
 char   *var_tls_server_sni_maps;
 bool    var_tls_fast_shutdown;
 bool    var_tls_preempt_clist;
+bool    var_tls_srvr_ccerts;
 
 #ifdef USE_TLS
 
@@ -494,8 +541,8 @@ static const LONG_NAME_MASK ssl_op_tweaks[] = {
 const NAME_CODE tls_cipher_grade_table[] = {
     "high", TLS_CIPHER_HIGH,
     "medium", TLS_CIPHER_MEDIUM,
-    "low", TLS_CIPHER_LOW,
-    "export", TLS_CIPHER_EXPORT,
+    "low", TLS_CIPHER_MEDIUM,
+    "export", TLS_CIPHER_MEDIUM,
     "null", TLS_CIPHER_NULL,
     "invalid", TLS_CIPHER_NONE,
     0, TLS_CIPHER_NONE,
@@ -536,6 +583,7 @@ static const NAME_MASK tls_log_table[] = {
     "ssl-debug", TLS_LOG_DEBUG,		/* SSL library debug/verbose */
     "ssl-handshake-packet-dump", TLS_LOG_TLSPKTS,
     "ssl-session-packet-dump", TLS_LOG_TLSPKTS | TLS_LOG_ALLPKTS,
+    "trace", TLS_LOG_TRACE,		/* SSL_trace() to a file or email */
     0, 0,
 };
 
@@ -558,8 +606,143 @@ int     tls_log_mask(const char *log_param, const char *log_level)
 
     mask = name_mask_opt(log_param, tls_log_table, log_level,
 			 NAME_MASK_ANY_CASE | NAME_MASK_RETURN);
+#ifndef HAVE_SSL_TRACE
+    if (mask & TLS_LOG_TRACE) {
+	static BH_TABLE *log_spam_filter;
+
+	if (log_spam_filter == 0)
+	    log_spam_filter = been_here_init(BH_BOUND_NONE, BH_FLAG_NONE);
+	if (!been_here(log_spam_filter, "%s=%s", log_param, log_level)) {
+	    msg_warn("%s: ignoring \"trace\" log level: "
+		     "SSL_trace() is not available in this build",
+		     log_param);
+	}
+	mask &= ~TLS_LOG_TRACE;			/* Never used */
+    }
+#endif
     return (mask);
 }
+
+#ifdef HAVE_SSL_TRACE
+
+/* tls_msg_callback - SSL message callback for TLS_LOG_TRACE */
+
+void    tls_msg_callback(int write_p, int version, int content_type,
+			         const void *buf, size_t msglen,
+			         SSL *ssl, void *arg)
+{
+    TLS_SESS_STATE *TLScontext = (TLS_SESS_STATE *) arg;
+    BIO    *bio = TLScontext->trace_bio;
+
+    /*
+     * trace_size_limit <= 0 means either tracing is off (never started) or
+     * we already crossed the budget and emitted the truncation marker.
+     * Either way, do not write further.
+     */
+    if (bio == 0 || TLScontext->trace_size_limit <= 0)
+	return;
+
+    SSL_trace(write_p, version, content_type, buf, msglen, ssl, bio);
+
+    if (BIO_tell(bio) >= TLScontext->trace_size_limit) {
+	static const char trailer[] =
+	"\n[TLS trace truncated: size limit reached]\n";
+
+	(void) BIO_write(bio, trailer, sizeof(trailer) - 1);
+	TLScontext->trace_size_limit = -1;
+    }
+}
+
+/* tls_trace_rate_ok - enforce tls_trace_rate_limit */
+
+bool    tls_trace_rate_ok(int tls_trace_rate_limit)
+{
+    ANVIL_CLNT *client;
+    int     rate;
+    int     ret;
+
+    if (tls_trace_rate_limit > 0) {
+	client = anvil_clnt_create();
+	if (anvil_clnt_tlstr(client, "any", "any", &rate) == ANVIL_STAT_OK) {
+	    ret = rate <= tls_trace_rate_limit;
+	} else {
+	    ret = false;
+	}
+	anvil_clnt_free(client);
+    } else {
+	ret = true;
+    }
+    return (ret);
+}
+
+/* tls_trace_create_qfile - default trace destination for daemons */
+
+BIO    *tls_trace_create_qfile(const char *trace_peer)
+{
+    VSTRING *path;
+    BIO    *bio;
+
+    /*
+     * Create the file under "tlstrace/". The cwd of every Postfix daemon is
+     * $queue_directory, so the relative path resolves correctly with or
+     * without chroot. The directory itself is expected to exist;
+     * postfix-script and postfix-files arrange for it, and most Postfix
+     * daemons would not have sufficient privileges to create it.
+     */
+    path = vstring_alloc(100);
+    vstring_strcpy(path, TLS_TRACE_QDIR "/");
+    bio = tls_trace_create_file(path, trace_peer);
+    msg_info("TLS protocol trace for %s saved to %s",
+	     trace_peer, vstring_str(path));
+    vstring_free(path);
+    return (bio);
+}
+
+/* tls_trace_create_file - trace destination for CLI or daemon */
+
+BIO    *tls_trace_create_file(VSTRING *path, const char *trace_peer)
+{
+    struct timeval tv;
+    struct tm *lt;
+    FILE   *fp;
+    BIO    *bio;
+
+    int     newfd;
+
+    /*
+     * Append "<app>-<yyyymmddhhmmss>.<usec>-<peer>-XXXXXX" to the path. Open
+     * with mkstemp() so that this will never clobber an existing file;
+     * fdopen(3) hands the descriptor to stdio, and BIO_new_fp() with
+     * BIO_CLOSE() wraps the stream so that BIO_free_all() at session
+     * teardown also fclose()s it.
+     */
+    vstring_sprintf_append(path, "%s-", var_procname);
+    GETTIMEOFDAY(&tv);
+    lt = localtime(&tv.tv_sec);
+    while (strftime(vstring_end(path), vstring_avail(path),
+		    "%Y%m%d%H%M%S", lt) == 0)
+	VSTRING_SPACE(path, vstring_avail(path) + 100);
+    VSTRING_SKIP(path);
+    vstring_sprintf_append(path, ".%06d-%s-XXXXXX",
+			   (int) tv.tv_usec, trace_peer);
+    if ((newfd = mkstemp(vstring_str(path))) < 0) {
+	msg_warn("TLS trace: cannot open %s: %m", vstring_str(path));
+	return (0);
+    }
+    if ((fp = fdopen(newfd, "w")) == 0) {
+	msg_warn("TLS trace: fdopen(%s) failed: %m", vstring_str(path));
+	(void) close(newfd);
+	return (0);
+    }
+    if ((bio = BIO_new_fp(fp, BIO_CLOSE)) == 0) {
+	msg_warn("TLS trace: BIO_new_fp() failed for %s", vstring_str(path));
+	(void) fclose(fp);
+	return (0);
+    }
+    return (bio);
+}
+
+#endif					/* HAVE_SSL_TRACE */
 
 /* tls_update_app_logmask - update log level after init */
 
@@ -640,16 +823,19 @@ int     tls_proto_mask_lims(const char *plist, int *floor, int *ceiling)
 
 void    tls_param_init(void)
 {
-    /* If this changes, update TLS_CLIENT_PARAMS in tls_proxy.h. */
+    /* If this changes, update TLS_*_PARAMS* in tls_*.h. */
     static const CONFIG_STR_TABLE str_table[] = {
+	VAR_TLS_CNF_FILE, DEF_TLS_CNF_FILE, &var_tls_cnf_file, 0, 0,
+	VAR_TLS_CNF_NAME, DEF_TLS_CNF_NAME, &var_tls_cnf_name, 0, 0,
 	VAR_TLS_HIGH_CLIST, DEF_TLS_HIGH_CLIST, &var_tls_high_clist, 1, 0,
 	VAR_TLS_MEDIUM_CLIST, DEF_TLS_MEDIUM_CLIST, &var_tls_medium_clist, 1, 0,
-	VAR_TLS_LOW_CLIST, DEF_TLS_LOW_CLIST, &var_tls_low_clist, 1, 0,
-	VAR_TLS_EXPORT_CLIST, DEF_TLS_EXPORT_CLIST, &var_tls_export_clist, 1, 0,
+	VAR_TLS_LOW_CLIST, DEF_TLS_LOW_CLIST, &var_tls_low_ignored, 0, 0,
+	VAR_TLS_EXPORT_CLIST, DEF_TLS_EXPORT_CLIST, &var_tls_export_ignored, 0, 0,
 	VAR_TLS_NULL_CLIST, DEF_TLS_NULL_CLIST, &var_tls_null_clist, 1, 0,
-	VAR_TLS_EECDH_AUTO, DEF_TLS_EECDH_AUTO, &var_tls_eecdh_auto, 1, 0,
-	VAR_TLS_EECDH_STRONG, DEF_TLS_EECDH_STRONG, &var_tls_eecdh_strong, 1, 0,
-	VAR_TLS_EECDH_ULTRA, DEF_TLS_EECDH_ULTRA, &var_tls_eecdh_ultra, 1, 0,
+	VAR_TLS_EECDH_AUTO, DEF_TLS_EECDH_AUTO, &var_tls_eecdh_auto, 0, 0,
+	VAR_TLS_EECDH_STRONG, DEF_TLS_EECDH_STRONG, &var_tls_eecdh_strong, 0, 0,
+	VAR_TLS_EECDH_ULTRA, DEF_TLS_EECDH_ULTRA, &var_tls_eecdh_ultra, 0, 0,
+	VAR_TLS_FFDHE_AUTO, DEF_TLS_FFDHE_AUTO, &var_tls_ffdhe_auto, 0, 0,
 	VAR_TLS_BUG_TWEAKS, DEF_TLS_BUG_TWEAKS, &var_tls_bug_tweaks, 0, 0,
 	VAR_TLS_SSL_OPTIONS, DEF_TLS_SSL_OPTIONS, &var_tls_ssl_options, 0, 0,
 	VAR_TLS_DANE_DIGESTS, DEF_TLS_DANE_DIGESTS, &var_tls_dane_digests, 1, 0,
@@ -659,19 +845,20 @@ void    tls_param_init(void)
 	0,
     };
 
-    /* If this changes, update TLS_CLIENT_PARAMS in tls_proxy.h. */
+    /* If this changes, update TLS_*_PARAMS* in tls_*.h. */
     static const CONFIG_INT_TABLE int_table[] = {
 	VAR_TLS_DAEMON_RAND_BYTES, DEF_TLS_DAEMON_RAND_BYTES, &var_tls_daemon_rand_bytes, 1, 0,
+	VAR_TLS_TRACE_ANVIL_RATE, DEF_TLS_TRACE_ANVIL_RATE, &var_tls_trace_anvil_rate, 0, 0,
 	0,
     };
 
-    /* If this changes, update TLS_CLIENT_PARAMS in tls_proxy.h. */
+    /* If this changes, update TLS_*_PARAMS* in tls_*.h. */
     static const CONFIG_BOOL_TABLE bool_table[] = {
 	VAR_TLS_APPEND_DEF_CA, DEF_TLS_APPEND_DEF_CA, &var_tls_append_def_CA,
-	VAR_TLS_BC_PKEY_FPRINT, DEF_TLS_BC_PKEY_FPRINT, &var_tls_bc_pkey_fprint,
 	VAR_TLS_PREEMPT_CLIST, DEF_TLS_PREEMPT_CLIST, &var_tls_preempt_clist,
 	VAR_TLS_MULTI_WILDCARD, DEF_TLS_MULTI_WILDCARD, &var_tls_multi_wildcard,
 	VAR_TLS_FAST_SHUTDOWN, DEF_TLS_FAST_SHUTDOWN, &var_tls_fast_shutdown,
+	VAR_TLS_SRVR_CCERTS, DEF_TLS_SRVR_CCERTS, &var_tls_srvr_ccerts,
 	0,
     };
     static int init_done;
@@ -683,6 +870,118 @@ void    tls_param_init(void)
     get_mail_conf_str_table(str_table);
     get_mail_conf_int_table(int_table);
     get_mail_conf_bool_table(bool_table);
+}
+
+/* tls_library_init - perform OpenSSL library initialization */
+
+int     tls_library_init(void)
+{
+    OPENSSL_INIT_SETTINGS *init_settings;
+    char   *conf_name = *var_tls_cnf_name ? var_tls_cnf_name : 0;
+    char   *conf_file = 0;
+    unsigned long init_opts = 0;
+
+#define TLS_LIB_INIT_TODO	(-1)
+#define TLS_LIB_INIT_ERR	(0)
+#define TLS_LIB_INIT_OK		(1)
+
+    static int init_res = TLS_LIB_INIT_TODO;
+
+    if (init_res != TLS_LIB_INIT_TODO)
+	return (init_res);
+
+    /*
+     * Backwards compatibility: skip this function unless the Postfix
+     * configuration actually has non-default tls_config_xxx settings.
+     */
+    if (strcmp(var_tls_cnf_file, DEF_TLS_CNF_FILE) == 0
+	&& strcmp(var_tls_cnf_name, DEF_TLS_CNF_NAME) == 0) {
+	if (msg_verbose)
+	    msg_info("tls_library_init: using backwards-compatible defaults");
+	return (init_res = TLS_LIB_INIT_OK);
+    }
+    if ((init_settings = OPENSSL_INIT_new()) == 0) {
+	msg_warn("error allocating OpenSSL init settings, "
+		 "disabling TLS support");
+	return (init_res = TLS_LIB_INIT_ERR);
+    }
+#define TLS_LIB_INIT_RETURN(x) \
+    do { OPENSSL_INIT_free(init_settings); return (init_res = (x)); } while(0)
+
+#if OPENSSL_VERSION_NUMBER < 0x1010102fL
+
+    /*
+     * OpenSSL 1.1.0 through 1.1.1a, no support for custom configuration
+     * files, disabling loading of the file, or getting strict error
+     * handling.  Thus, the only supported configuration file is "default".
+     */
+    if (strcmp(var_tls_cnf_file, "default") != 0) {
+	msg_warn("non-default %s = %s requires OpenSSL 1.1.1b or later, "
+	       "disabling TLS support", VAR_TLS_CNF_FILE, var_tls_cnf_file);
+	TLS_LIB_INIT_RETURN(TLS_LIB_INIT_ERR);
+    }
+#else
+    {
+	unsigned long file_flags = 0;
+
+	/*-
+	 * OpenSSL 1.1.1b or later:
+	 * We can now use a non-default configuration file, or
+	 * use none at all.  We can also request strict error
+	 * reporting.
+	 */
+	if (strcmp(var_tls_cnf_file, "none") == 0) {
+	    init_opts |= OPENSSL_INIT_NO_LOAD_CONFIG;
+	} else if (strcmp(var_tls_cnf_file, "default") == 0) {
+
+	    /*
+	     * The default global config file is optional.  With "default"
+	     * initialization we don't insist on a match for the requested
+	     * application name, allowing fallback to the default application
+	     * name, even when a non-default application name is specified.
+	     * Errors in loading the default configuration are ignored.
+	     */
+	    conf_file = 0;
+	    file_flags |= CONF_MFLAGS_IGNORE_MISSING_FILE;
+	    file_flags |= CONF_MFLAGS_DEFAULT_SECTION;
+	    file_flags |= CONF_MFLAGS_IGNORE_RETURN_CODES | CONF_MFLAGS_SILENT;
+	} else if (*var_tls_cnf_file == '/') {
+
+	    /*
+	     * A custom config file must be present, error reporting is
+	     * strict and the configuration section for the requested
+	     * application name does not fall back to "openssl_conf" when
+	     * missing.
+	     */
+	    conf_file = var_tls_cnf_file;
+	} else {
+	    msg_warn("non-default %s = %s is not an absolute pathname, "
+	       "disabling TLS support", VAR_TLS_CNF_FILE, var_tls_cnf_file);
+	    TLS_LIB_INIT_RETURN(TLS_LIB_INIT_ERR);
+	}
+
+	OPENSSL_INIT_set_config_file_flags(init_settings, file_flags);
+    }
+#endif
+
+    if (conf_file)
+	OPENSSL_INIT_set_config_filename(init_settings, conf_file);
+    if (conf_name)
+	OPENSSL_INIT_set_config_appname(init_settings, conf_name);
+
+    if (OPENSSL_init_ssl(init_opts, init_settings) <= 0) {
+	if ((init_opts & OPENSSL_INIT_NO_LOAD_CONFIG) == 0)
+	    msg_warn("error loading the '%s' settings from the %s OpenSSL "
+		     "configuration file, disabling TLS support",
+		     conf_name ? conf_name : "global",
+		     conf_file ? conf_file : "default");
+	else
+	    msg_warn("error initializing the OpenSSL library, "
+		     "disabling TLS support");
+	tls_print_errors();
+	TLS_LIB_INIT_RETURN(TLS_LIB_INIT_ERR);
+    }
+    TLS_LIB_INIT_RETURN(TLS_LIB_INIT_OK);
 }
 
 /* tls_pre_jail_init - Load TLS related pre-jail tables */
@@ -710,18 +1009,49 @@ void    tls_pre_jail_init(TLS_ROLE role)
 	maps_create(VAR_TLS_SERVER_SNI_MAPS, var_tls_server_sni_maps, flags);
 }
 
-/* server_sni_callback - process client's SNI extension */
-
-static int server_sni_callback(SSL *ssl, int *alert, void *arg)
+int     tls_cert_cb(SSL *ssl, void *arg)
 {
-    SSL_CTX *sni_ctx = (SSL_CTX *) arg;
-    TLS_SESS_STATE *TLScontext = SSL_get_ex_data(ssl, TLScontext_index);
-    const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-    const char *cp = sni;
+    TLS_SESS_STATE *TLScontext = arg;
+    const char *cp = TLScontext->peer_sni;
     const char *pem;
 
+    if (!cp || !tls_server_sni_maps)
+	return 1;
+
+    do {
+	/* Don't silently skip maps opened with the wrong flags. */
+	pem = maps_file_find(tls_server_sni_maps, cp, 0);
+    } while (!pem
+	     && !tls_server_sni_maps->error
+	     && (cp = strchr(cp + 1, '.')) != 0);
+
+    if (!pem) {
+	if (tls_server_sni_maps->error) {
+	    msg_warn("%s: %s map lookup problem",
+		     tls_server_sni_maps->title, TLScontext->peer_sni);
+	    return 0;
+	}
+	msg_info("TLS SNI %s from %s not matched, using default chain",
+		 TLScontext->peer_sni, TLScontext->namaddr);
+	return 1;
+    }
+    SSL_certs_clear(ssl);
+    if (tls_load_pem_chain(ssl, pem, TLScontext->peer_sni) == 0)
+	return 1;
+
+    /* errors already logged */
+    return 0;
+}
+
+/* server_sni_callback - process client's SNI extension */
+
+static int server_sni_callback(SSL *ssl, int *alert, void *unused)
+{
+    TLS_SESS_STATE *TLScontext = SSL_get_ex_data(ssl, TLScontext_index);
+    const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+
     /* SNI is silently ignored when we don't care or is NULL or empty */
-    if (!sni_ctx || !tls_server_sni_maps || !sni || !*sni)
+    if (!tls_server_sni_maps || !sni || !*sni)
 	return SSL_TLSEXT_ERR_NOACK;
 
     if (!valid_hostname(sni, DONT_GRIPE)) {
@@ -749,37 +1079,6 @@ static int server_sni_callback(SSL *ssl, int *alert, void *arg)
 	msg_warn("TLS SNI changed from %s initially %s, %s after hello retry",
 		 TLScontext->namaddr, TLScontext->peer_sni, sni);
 	return SSL_TLSEXT_ERR_NOACK;
-    }
-    do {
-	/* Don't silently skip maps opened with the wrong flags. */
-	pem = maps_file_find(tls_server_sni_maps, cp, 0);
-    } while (!pem
-	     && !tls_server_sni_maps->error
-	     && (cp = strchr(cp + 1, '.')) != 0);
-
-    if (!pem) {
-	if (tls_server_sni_maps->error) {
-	    msg_warn("%s: %s map lookup problem",
-		     tls_server_sni_maps->title, sni);
-	    *alert = SSL_AD_INTERNAL_ERROR;
-	    return SSL_TLSEXT_ERR_ALERT_FATAL;
-	}
-	msg_info("TLS SNI %s from %s not matched, using default chain",
-		 sni, TLScontext->namaddr);
-
-	/*
-	 * XXX: We could lie and pretend to accept the name, but since we've
-	 * previously not implemented the callback (with OpenSSL then
-	 * declining the extension), and nothing bad happened, declining it
-	 * explicitly should be safe.
-	 */
-	return SSL_TLSEXT_ERR_NOACK;
-    }
-    SSL_set_SSL_CTX(ssl, sni_ctx);
-    if (tls_load_pem_chain(ssl, pem, sni) != 0) {
-	/* errors already logged */
-	*alert = SSL_AD_INTERNAL_ERROR;
-	return SSL_TLSEXT_ERR_ALERT_FATAL;
     }
     TLScontext->peer_sni = mystrdup(sni);
     return SSL_TLSEXT_ERR_OK;
@@ -810,12 +1109,6 @@ const char *tls_set_ciphers(TLS_SESS_STATE *TLScontext, const char *grade,
 	break;
     case TLS_CIPHER_MEDIUM:
 	vstring_strcpy(buf, var_tls_medium_clist);
-	break;
-    case TLS_CIPHER_LOW:
-	vstring_strcpy(buf, var_tls_low_clist);
-	break;
-    case TLS_CIPHER_EXPORT:
-	vstring_strcpy(buf, var_tls_export_clist);
 	break;
     case TLS_CIPHER_NULL:
 	vstring_strcpy(buf, var_tls_null_clist);
@@ -861,98 +1154,155 @@ const char *tls_set_ciphers(TLS_SESS_STATE *TLScontext, const char *grade,
     return (vstring_str(buf));
 }
 
+/* ec_curve_name - copy EC key curve group name */
+
+#ifndef OPENSSL_NO_EC
+static char *ec_curve_name(EVP_PKEY *pkey)
+{
+    char   *curve = 0;
+
+#if OPENSSL_VERSION_PREREQ(3,0)
+    size_t  namelen;
+
+    if (EVP_PKEY_get_group_name(pkey, 0, 0, &namelen)) {
+	curve = mymalloc(++namelen);
+	if (!EVP_PKEY_get_group_name(pkey, curve, namelen, 0)) {
+	    myfree(curve);
+	    curve = 0;
+	}
+    }
+#else
+    EC_KEY *eckey = EVP_PKEY_get0_EC_KEY(pkey);
+    int     nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(eckey));
+    const char *tmp = EC_curve_nid2nist(nid);
+
+    if (!tmp)
+	tmp = OBJ_nid2sn(nid);
+    if (tmp)
+	curve = mystrdup(tmp);
+#endif
+    return (curve);
+}
+
+#endif
+
 /* tls_get_signature_params - TLS 1.3 signature details */
 
 void    tls_get_signature_params(TLS_SESS_STATE *TLScontext)
 {
     const char *kex_name = 0;
-    const char *kex_curve = 0;
     const char *locl_sig_name = 0;
-    const char *locl_sig_curve = 0;
     const char *locl_sig_dgst = 0;
     const char *peer_sig_name = 0;
-    const char *peer_sig_curve = 0;
     const char *peer_sig_dgst = 0;
+    char   *kex_curve = 0;
+    char   *locl_sig_curve = 0;
+    char   *peer_sig_curve = 0;
     int     nid;
     SSL    *ssl = TLScontext->con;
     int     srvr = SSL_is_server(ssl);
-    X509   *cert;
-    EVP_PKEY *pkey = 0;
-
-#ifndef OPENSSL_NO_EC
-    EC_KEY *eckey;
-
-#endif
+    EVP_PKEY *dh_pkey = 0;
+    EVP_PKEY *local_pkey = 0;
+    X509   *peer_cert;
+    EVP_PKEY *peer_pkey = 0;
 
 #define SIG_PROP(c, s, p) (*((s) ? &c->srvr_sig_##p : &c->clnt_sig_##p))
 
     if (SSL_version(ssl) < TLS1_3_VERSION)
 	return;
 
-    if (tls_get_peer_dh_pubkey(ssl, &pkey)) {
-	switch (nid = EVP_PKEY_id(pkey)) {
+    /*
+     * On the client side, a TLS 1.3 KEM has no server key, just ciphertext
+     * to decapsulate, but, as of OpenSSL 3.0, the client can still obtain
+     * the negotiated group name directly.
+     */
+    if (!kex_name)
+	kex_name = TLS_GROUP_NAME(ssl);
+
+    if (kex_name == NULL && tls_get_peer_dh_pubkey(ssl, &dh_pkey)) {
+	switch (nid = EVP_PKEY_id(dh_pkey)) {
 	default:
 	    kex_name = OBJ_nid2sn(EVP_PKEY_type(nid));
 	    break;
 
+#if defined(EVP_PKEY_KEYMGMT)
+	case EVP_PKEY_KEYMGMT:
+	    kex_name = EVP_PKEY_get0_type_name(dh_pkey);
+	    TLScontext->kex_bits = 0;
+	    break;
+#endif
+
 	case EVP_PKEY_DH:
 	    kex_name = "DHE";
-	    TLScontext->kex_bits = EVP_PKEY_bits(pkey);
+	    TLScontext->kex_bits = EVP_PKEY_bits(dh_pkey);
 	    break;
 
 #ifndef OPENSSL_NO_EC
 	case EVP_PKEY_EC:
 	    kex_name = "ECDHE";
-	    eckey = EVP_PKEY_get0_EC_KEY(pkey);
-	    nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(eckey));
-	    kex_curve = EC_curve_nid2nist(nid);
-	    if (!kex_curve)
-		kex_curve = OBJ_nid2sn(nid);
+	    kex_curve = ec_curve_name(dh_pkey);
 	    break;
 #endif
 	}
-	EVP_PKEY_free(pkey);
     }
+    if (kex_name) {
+	TLScontext->kex_name = mystrdup(kex_name);
+	TLScontext->kex_curve = kex_curve;
+    }
+    /* Not a problem if NULL */
+    EVP_PKEY_free(dh_pkey);
+
+    /* Resumption makes no use of signature keys or digests */
+    if (TLScontext->session_reused)
+	return;
 
     /*
-     * On the client end, the certificate may be preset, but not used, so we
+     * On the client end, the certificate may be present, but not used, so we
      * check via SSL_get_signature_nid().  This means that local signature
      * data on clients requires at least 1.1.1a.
      */
-    if (srvr || SSL_get_signature_nid(ssl, &nid))
-	cert = SSL_get_certificate(ssl);
-    else
-	cert = 0;
-
+    if (srvr || SSL_get_signature_nid(ssl, &nid)) {
+	local_pkey = SSL_get_privatekey(ssl);
+    }
     /* Signature algorithms for the local end of the connection */
-    if (cert) {
-	pkey = X509_get0_pubkey(cert);
+    if (local_pkey) {
+#if OPENSSL_VERSION_PREREQ(3,2)
+	if (srvr)
+	    TLScontext->stoc_rpk = TLSEXT_cert_type_rpk ==
+		SSL_get_negotiated_server_cert_type(ssl);
+	else
+	    TLScontext->ctos_rpk = TLSEXT_cert_type_rpk ==
+		SSL_get_negotiated_client_cert_type(ssl);
+#endif
 
 	/*
 	 * Override the built-in name for the "ECDSA" algorithms OID, with
 	 * the more familiar name.  For "RSA" keys report "RSA-PSS", which
 	 * must be used with TLS 1.3.
 	 */
-	if ((nid = EVP_PKEY_type(EVP_PKEY_id(pkey))) != NID_undef) {
+	if ((nid = EVP_PKEY_id(local_pkey)) != NID_undef) {
 	    switch (nid) {
 	    default:
-		locl_sig_name = OBJ_nid2sn(nid);
+		if ((nid = EVP_PKEY_type(nid)) != NID_undef)
+		    locl_sig_name = OBJ_nid2sn(nid);
 		break;
+
+#if defined(EVP_PKEY_KEYMGMT)
+	    case EVP_PKEY_KEYMGMT:
+		locl_sig_name = EVP_PKEY_get0_type_name(local_pkey);
+		break;
+#endif
 
 	    case EVP_PKEY_RSA:
 		/* For RSA, TLS 1.3 mandates PSS signatures */
 		locl_sig_name = "RSA-PSS";
-		SIG_PROP(TLScontext, srvr, bits) = EVP_PKEY_bits(pkey);
+		SIG_PROP(TLScontext, srvr, bits) = EVP_PKEY_bits(local_pkey);
 		break;
 
 #ifndef OPENSSL_NO_EC
 	    case EVP_PKEY_EC:
 		locl_sig_name = "ECDSA";
-		eckey = EVP_PKEY_get0_EC_KEY(pkey);
-		nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(eckey));
-		locl_sig_curve = EC_curve_nid2nist(nid);
-		if (!locl_sig_curve)
-		    locl_sig_curve = OBJ_nid2sn(nid);
+		locl_sig_curve = ec_curve_name(local_pkey);
 		break;
 #endif
 	    }
@@ -964,36 +1314,63 @@ void    tls_get_signature_params(TLS_SESS_STATE *TLScontext)
 	 */
 	if (SSL_get_signature_nid(ssl, &nid) && nid != NID_undef)
 	    locl_sig_dgst = OBJ_nid2sn(nid);
+
+	if (locl_sig_name) {
+	    SIG_PROP(TLScontext, srvr, name) = mystrdup(locl_sig_name);
+	    SIG_PROP(TLScontext, srvr, curve) = locl_sig_curve;
+	    if (locl_sig_dgst)
+		SIG_PROP(TLScontext, srvr, dgst) = mystrdup(locl_sig_dgst);
+	}
     }
+    peer_cert = TLS_PEEK_PEER_CERT(ssl);
+    if (peer_cert != 0) {
+	peer_pkey = X509_get0_pubkey(peer_cert);
+    }
+#if OPENSSL_VERSION_PREREQ(3,2)
+    else {
+	peer_pkey = SSL_get0_peer_rpk(ssl);
+    }
+#endif
+
     /* Signature algorithms for the peer end of the connection */
-    if ((cert = SSL_get_peer_certificate(ssl)) != 0) {
-	pkey = X509_get0_pubkey(cert);
+    if (peer_pkey != 0) {
+#if OPENSSL_VERSION_PREREQ(3,2)
+	if (srvr)
+	    TLScontext->ctos_rpk = TLSEXT_cert_type_rpk ==
+		SSL_get_negotiated_client_cert_type(ssl);
+	else
+	    TLScontext->stoc_rpk = TLSEXT_cert_type_rpk ==
+		SSL_get_negotiated_server_cert_type(ssl);
+#endif
 
 	/*
 	 * Override the built-in name for the "ECDSA" algorithms OID, with
 	 * the more familiar name.  For "RSA" keys report "RSA-PSS", which
 	 * must be used with TLS 1.3.
 	 */
-	if ((nid = EVP_PKEY_type(EVP_PKEY_id(pkey))) != NID_undef) {
+	if ((nid = EVP_PKEY_id(peer_pkey)) != NID_undef) {
 	    switch (nid) {
 	    default:
-		peer_sig_name = OBJ_nid2sn(nid);
+		if ((nid = EVP_PKEY_type(nid)) != NID_undef)
+		    peer_sig_name = OBJ_nid2sn(nid);
 		break;
+
+#if defined(EVP_PKEY_KEYMGMT)
+	    case EVP_PKEY_KEYMGMT:
+		peer_sig_name = EVP_PKEY_get0_type_name(peer_pkey);
+		break;
+#endif
 
 	    case EVP_PKEY_RSA:
 		/* For RSA, TLS 1.3 mandates PSS signatures */
 		peer_sig_name = "RSA-PSS";
-		SIG_PROP(TLScontext, !srvr, bits) = EVP_PKEY_bits(pkey);
+		SIG_PROP(TLScontext, !srvr, bits) = EVP_PKEY_bits(peer_pkey);
 		break;
 
 #ifndef OPENSSL_NO_EC
 	    case EVP_PKEY_EC:
 		peer_sig_name = "ECDSA";
-		eckey = EVP_PKEY_get0_EC_KEY(pkey);
-		nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(eckey));
-		peer_sig_curve = EC_curve_nid2nist(nid);
-		if (!peer_sig_curve)
-		    peer_sig_curve = OBJ_nid2sn(nid);
+		peer_sig_curve = ec_curve_name(peer_pkey);
 		break;
 #endif
 	    }
@@ -1006,27 +1383,14 @@ void    tls_get_signature_params(TLS_SESS_STATE *TLScontext)
 	if (SSL_get_peer_signature_nid(ssl, &nid) && nid != NID_undef)
 	    peer_sig_dgst = OBJ_nid2sn(nid);
 
-	X509_free(cert);
+	if (peer_sig_name) {
+	    SIG_PROP(TLScontext, !srvr, name) = mystrdup(peer_sig_name);
+	    SIG_PROP(TLScontext, !srvr, curve) = peer_sig_curve;
+	    if (peer_sig_dgst)
+		SIG_PROP(TLScontext, !srvr, dgst) = mystrdup(peer_sig_dgst);
+	}
     }
-    if (kex_name) {
-	TLScontext->kex_name = mystrdup(kex_name);
-	if (kex_curve)
-	    TLScontext->kex_curve = mystrdup(kex_curve);
-    }
-    if (locl_sig_name) {
-	SIG_PROP(TLScontext, srvr, name) = mystrdup(locl_sig_name);
-	if (locl_sig_curve)
-	    SIG_PROP(TLScontext, srvr, curve) = mystrdup(locl_sig_curve);
-	if (locl_sig_dgst)
-	    SIG_PROP(TLScontext, srvr, dgst) = mystrdup(locl_sig_dgst);
-    }
-    if (peer_sig_name) {
-	SIG_PROP(TLScontext, !srvr, name) = mystrdup(peer_sig_name);
-	if (peer_sig_curve)
-	    SIG_PROP(TLScontext, !srvr, curve) = mystrdup(peer_sig_curve);
-	if (peer_sig_dgst)
-	    SIG_PROP(TLScontext, !srvr, dgst) = mystrdup(peer_sig_dgst);
-    }
+    TLS_FREE_PEER_CERT(peer_cert);
 }
 
 /* tls_log_summary - TLS loglevel 1 one-liner, embellished with TLS 1.3 details */
@@ -1045,7 +1409,7 @@ void    tls_log_summary(TLS_ROLE role, TLS_USAGE usage, TLS_SESS_STATE *ctx)
      */
     vstring_sprintf(msg, "%s TLS connection %s %s %s%s%s: %s"
 		    " with cipher %s (%d/%d bits)",
-		    !TLS_CERT_IS_PRESENT(ctx) ? "Anonymous" :
+		    !TLS_CRED_IS_PRESENT(ctx) ? "Anonymous" :
 		    TLS_CERT_IS_SECURED(ctx) ? "Verified" :
 		    TLS_CERT_IS_TRUSTED(ctx) ? "Trusted" : "Untrusted",
 		    usage == TLS_USAGE_NEW ? "established" : "reused",
@@ -1064,9 +1428,13 @@ void    tls_log_summary(TLS_ROLE role, TLS_USAGE usage, TLS_SESS_STATE *ctx)
 	vstring_sprintf_append(msg, " server-signature %s",
 			       ctx->srvr_sig_name);
 	if (ctx->srvr_sig_curve && *ctx->srvr_sig_curve)
-	    vstring_sprintf_append(msg, " (%s)", ctx->srvr_sig_curve);
+	    vstring_sprintf_append(msg, " (%s%s)", ctx->srvr_sig_curve,
+				   ctx->stoc_rpk ? " raw public key" : "");
 	else if (ctx->srvr_sig_bits > 0)
-	    vstring_sprintf_append(msg, " (%d bits)", ctx->srvr_sig_bits);
+	    vstring_sprintf_append(msg, " (%d bit%s)", ctx->srvr_sig_bits,
+				   ctx->stoc_rpk ? " raw public key" : "s");
+	else if (ctx->stoc_rpk)
+	    vstring_sprintf_append(msg, " (raw public key)");
 	if (ctx->srvr_sig_dgst && *ctx->srvr_sig_dgst)
 	    vstring_sprintf_append(msg, " server-digest %s",
 				   ctx->srvr_sig_dgst);
@@ -1075,9 +1443,13 @@ void    tls_log_summary(TLS_ROLE role, TLS_USAGE usage, TLS_SESS_STATE *ctx)
 	vstring_sprintf_append(msg, " client-signature %s",
 			       ctx->clnt_sig_name);
 	if (ctx->clnt_sig_curve && *ctx->clnt_sig_curve)
-	    vstring_sprintf_append(msg, " (%s)", ctx->clnt_sig_curve);
+	    vstring_sprintf_append(msg, " (%s%s)", ctx->clnt_sig_curve,
+				   ctx->ctos_rpk ? " raw public key" : "");
 	else if (ctx->clnt_sig_bits > 0)
-	    vstring_sprintf_append(msg, " (%d bits)", ctx->clnt_sig_bits);
+	    vstring_sprintf_append(msg, " (%d bit%s)", ctx->clnt_sig_bits,
+				   ctx->ctos_rpk ? " raw public key" : "s");
+	else if (ctx->ctos_rpk)
+	    vstring_sprintf_append(msg, " (raw public key)");
 	if (ctx->clnt_sig_dgst && *ctx->clnt_sig_dgst)
 	    vstring_sprintf_append(msg, " client-digest %s",
 				   ctx->clnt_sig_dgst);
@@ -1088,8 +1460,7 @@ void    tls_log_summary(TLS_ROLE role, TLS_USAGE usage, TLS_SESS_STATE *ctx)
 
 /* tls_alloc_app_context - allocate TLS application context */
 
-TLS_APPL_STATE *tls_alloc_app_context(SSL_CTX *ssl_ctx, SSL_CTX *sni_ctx,
-				              int log_mask)
+TLS_APPL_STATE *tls_alloc_app_context(SSL_CTX *ssl_ctx, int log_mask)
 {
     TLS_APPL_STATE *app_ctx;
 
@@ -1098,16 +1469,13 @@ TLS_APPL_STATE *tls_alloc_app_context(SSL_CTX *ssl_ctx, SSL_CTX *sni_ctx,
     /* See portability note below with other memset() call. */
     memset((void *) app_ctx, 0, sizeof(*app_ctx));
     app_ctx->ssl_ctx = ssl_ctx;
-    app_ctx->sni_ctx = sni_ctx;
     app_ctx->log_mask = log_mask;
 
     /* See also: cache purging code in tls_set_ciphers(). */
     app_ctx->cache_type = 0;
 
-    if (tls_server_sni_maps) {
+    if (tls_server_sni_maps)
 	SSL_CTX_set_tlsext_servername_callback(ssl_ctx, server_sni_callback);
-	SSL_CTX_set_tlsext_servername_arg(ssl_ctx, (void *) sni_ctx);
-    }
     return (app_ctx);
 }
 
@@ -1117,8 +1485,6 @@ void    tls_free_app_context(TLS_APPL_STATE *app_ctx)
 {
     if (app_ctx->ssl_ctx)
 	SSL_CTX_free(app_ctx->ssl_ctx);
-    if (app_ctx->sni_ctx)
-	SSL_CTX_free(app_ctx->sni_ctx);
     if (app_ctx->cache_type)
 	myfree(app_ctx->cache_type);
     myfree((void *) app_ctx);
@@ -1135,7 +1501,7 @@ TLS_SESS_STATE *tls_alloc_sess_context(int log_mask, const char *namaddr)
      * explicit assignments to initialize pointers.
      * 
      * See the C language FAQ item 5.17, or if you have time to burn,
-     * http://www.google.com/search?q=zero+bit+null+pointer
+     * https://www.google.com/search?q=zero+bit+null+pointer
      * 
      * However, it's OK to use memset() to zero integer values.
      */
@@ -1153,6 +1519,8 @@ TLS_SESS_STATE *tls_alloc_sess_context(int log_mask, const char *namaddr)
     TLScontext->cipher_name = 0;
     TLScontext->kex_name = 0;
     TLScontext->kex_curve = 0;
+    TLScontext->ctos_rpk = 0;
+    TLScontext->stoc_rpk = 0;
     TLScontext->clnt_sig_name = 0;
     TLScontext->clnt_sig_curve = 0;
     TLScontext->clnt_sig_dgst = 0;
@@ -1166,6 +1534,10 @@ TLS_SESS_STATE *tls_alloc_sess_context(int log_mask, const char *namaddr)
     TLScontext->errordepth = -1;
     TLScontext->errorcode = X509_V_OK;
     TLScontext->errorcert = 0;
+    TLScontext->rpt_reported = 0;
+    TLScontext->ffail_type = 0;
+    TLScontext->trace_bio = 0;
+    TLScontext->trace_size_limit = 0;
 
     return (TLScontext);
 }
@@ -1183,6 +1555,23 @@ void    tls_free_context(TLS_SESS_STATE *TLScontext)
     if (TLScontext->con != 0)
 	SSL_free(TLScontext->con);
 
+    /*
+     * Release the protocol trace, if one was opened.  Order matters:
+     * SSL_free() above can still drive the message callback during teardown
+     * (close-notify processing in particular), so trace_bio must stay valid
+     * until after SSL_free() returns.  Closing it first would let
+     * tls_msg_callback() write through a freed BIO.
+     * 
+     * Always BIO_flush() before close, so any stdio buffering inside
+     * BIO_new_fp() lands on disk before the FILE * is fclose()d.  An
+     * application override may release the BIO; otherwise BIO_free_all walks
+     * the chain and (with BIO_CLOSE) closes the underlying file.
+     */
+    if (TLScontext->trace_bio != 0) {
+	(void) BIO_flush(TLScontext->trace_bio);
+	BIO_free_all(TLScontext->trace_bio);
+	TLScontext->trace_bio = 0;
+    }
     if (TLScontext->namaddr)
 	myfree(TLScontext->namaddr);
     if (TLScontext->serverid)
@@ -1215,7 +1604,9 @@ void    tls_free_context(TLS_SESS_STATE *TLScontext)
     if (TLScontext->srvr_sig_dgst)
 	myfree((void *) TLScontext->srvr_sig_dgst);
     if (TLScontext->errorcert)
-	X509_free(TLScontext->errorcert);
+	X509_free((X509 *) TLScontext->errorcert);
+    if (TLScontext->ffail_type)
+	myfree(TLScontext->ffail_type);
 
     myfree((void *) TLScontext);
 }
@@ -1253,20 +1644,29 @@ void    tls_check_version(void)
 {
     TLS_VINFO hdr_info;
     TLS_VINFO lib_info;
+    int     warn_compat = 0;
 
     tls_version_split(OPENSSL_VERSION_NUMBER, &hdr_info);
     tls_version_split(OpenSSL_version_num(), &lib_info);
 
     /*
      * Warn if run-time library is different from compile-time library,
-     * allowing later run-time "micro" versions starting with 1.1.0.
+     * allowing later run-time "micro" versions starting with 1.1.0, and
+     * later minor numbers starting with 3.0.0.
      */
-    if (lib_info.major != hdr_info.major
-	|| lib_info.minor != hdr_info.minor
-	|| (lib_info.micro != hdr_info.micro
-	    && (lib_info.micro < hdr_info.micro
-		|| hdr_info.major == 0
-		|| (hdr_info.major == 1 && hdr_info.minor == 0))))
+    if (hdr_info.major >= 3) {
+	warn_compat = lib_info.major != hdr_info.major
+	    || lib_info.minor < hdr_info.minor;
+    } else if (hdr_info.major == 1 && hdr_info.minor != 0) {
+	warn_compat = lib_info.major != hdr_info.major
+	    || lib_info.minor != hdr_info.minor
+	    || lib_info.micro < hdr_info.micro;
+    } else {
+	warn_compat = lib_info.major != hdr_info.major
+	    || lib_info.minor != hdr_info.minor
+	    || lib_info.micro != hdr_info.micro;
+    }
+    if (warn_compat)
 	msg_warn("run-time library vs. compile-time header version mismatch: "
 	     "OpenSSL %d.%d.%d may not be compatible with OpenSSL %d.%d.%d",
 		 lib_info.major, lib_info.minor, lib_info.micro,
@@ -1351,6 +1751,12 @@ long    tls_bug_bits(void)
      * options just in case.
      */
     bits |= SSL_OP_SINGLE_ECDH_USE | SSL_OP_SINGLE_DH_USE;
+
+    /*
+     * Unconditionally disable a CPU resource attack. There's no good reason
+     * to enable TLS renegotiation in the middle of an SMTP connection.
+     */
+    bits |= SSL_OP_NO_RENEGOTIATION;
     return (bits);
 }
 
@@ -1365,7 +1771,14 @@ void    tls_print_errors(void)
     int     line;
     int     flags;
 
-    while ((err = ERR_get_error_line_data(&file, &line, &data, &flags)) != 0) {
+#if OPENSSL_VERSION_PREREQ(3,0)
+/* XXX: We're ignoring the function name, do we want to log it? */
+#define ERRGET(fi, l, d, fl) ERR_get_error_all(fi, l, 0, d, fl)
+#else
+#define ERRGET(fi, l, d, fl) ERR_get_error_line_data(fi, l, d, fl)
+#endif
+
+    while ((err = ERRGET(&file, &line, &data, &flags)) != 0) {
 	ERR_error_string_n(err, buffer, sizeof(buffer));
 	if (flags & ERR_TXT_STRING)
 	    msg_warn("TLS library problem: %s:%s:%d:%s:",
@@ -1428,7 +1841,7 @@ void    tls_info_callback(const SSL *s, int where, int ret)
   * 
   * Modified to save a lot of strcpy and strcat by Matti Aarnio.
   * 
-  * Rewritten by Wietse to elimate fixed-size stack buffer, array index
+  * Rewritten by Wietse to eliminate fixed-size stack buffer, array index
   * multiplication and division, sprintf() and strcpy(), and lots of strlen()
   * calls. We could make it a little faster by using a fixed-size stack-based
   * buffer.
@@ -1489,6 +1902,7 @@ static void tls_dump_buffer(const unsigned char *start, int len)
 
 /* taken from OpenSSL apps/s_cb.c */
 
+#if !OPENSSL_VERSION_PREREQ(3,0)
 long    tls_bio_dump_cb(BIO *bio, int cmd, const char *argp, int argi,
 			        long unused_argl, long ret)
 {
@@ -1506,29 +1920,97 @@ long    tls_bio_dump_cb(BIO *bio, int cmd, const char *argp, int argi,
     return (ret);
 }
 
+#else
+long    tls_bio_dump_cb(BIO *bio, int cmd, const char *argp, size_t len,
+	             int argi, long unused_argl, int ret, size_t *processed)
+{
+    size_t  bytes = (ret > 0 && processed != NULL) ? *processed : len;
+
+    if (cmd == (BIO_CB_READ | BIO_CB_RETURN)) {
+	if (ret > 0) {
+	    msg_info("read from %08lX [%08lX] (%ld bytes => %ld (0x%lX))",
+		     (unsigned long) bio, (unsigned long) argp, (long) len,
+		     (long) bytes, (long) bytes);
+	    tls_dump_buffer((unsigned char *) argp, (int) bytes);
+	} else {
+	    msg_info("read from %08lX [%08lX] (%ld bytes => %d)",
+		     (unsigned long) bio, (unsigned long) argp,
+		     (long) len, ret);
+	}
+    } else if (cmd == (BIO_CB_WRITE | BIO_CB_RETURN)) {
+	if (ret > 0) {
+	    msg_info("write to %08lX [%08lX] (%ld bytes => %ld (0x%lX))",
+		     (unsigned long) bio, (unsigned long) argp, (long) len,
+		     (long) bytes, (long) bytes);
+	    tls_dump_buffer((unsigned char *) argp, (int) bytes);
+	} else {
+	    msg_info("write to %08lX [%08lX] (%ld bytes => %d)",
+		     (unsigned long) bio, (unsigned long) argp,
+		     (long) len, ret);
+	}
+    }
+    return ret;
+}
+
+#endif
+
 const EVP_MD *tls_validate_digest(const char *dgst)
 {
     const EVP_MD *md_alg;
-    unsigned int md_len;
 
     /*
      * If the administrator specifies an unsupported digest algorithm, fail
      * now, rather than in the middle of a TLS handshake.
      */
-    if ((md_alg = EVP_get_digestbyname(dgst)) == 0) {
+    if ((md_alg = tls_digest_byname(dgst, NULL)) == 0)
 	msg_warn("Digest algorithm \"%s\" not found", dgst);
-	return (0);
-    }
-
-    /*
-     * Sanity check: Newer shared libraries may use larger digests.
-     */
-    if ((md_len = EVP_MD_size(md_alg)) > EVP_MAX_MD_SIZE) {
-	msg_warn("Digest algorithm \"%s\" output size %u too large",
-		 dgst, md_len);
-	return (0);
-    }
     return md_alg;
+}
+
+void    tls_enable_client_rpk(SSL_CTX *ctx, SSL *ssl)
+{
+#if OPENSSL_VERSION_PREREQ(3,2)
+    static int warned = 0;
+    static const unsigned char cert_types_rpk[] = {
+	TLSEXT_cert_type_rpk,
+	TLSEXT_cert_type_x509
+    };
+
+    if ((ctx && !SSL_CTX_set1_client_cert_type(ctx, cert_types_rpk,
+					       sizeof(cert_types_rpk))) ||
+	(ssl && !SSL_set1_client_cert_type(ssl, cert_types_rpk,
+					   sizeof(cert_types_rpk)))) {
+	if (warned++) {
+	    ERR_clear_error();
+	    return;
+	}
+	msg_warn("Failed to enable client to server raw public key support");
+	tls_print_errors();
+    }
+#endif
+}
+
+void    tls_enable_server_rpk(SSL_CTX *ctx, SSL *ssl)
+{
+#if OPENSSL_VERSION_PREREQ(3,2)
+    static int warned = 0;
+    static const unsigned char cert_types_rpk[] = {
+	TLSEXT_cert_type_rpk,
+	TLSEXT_cert_type_x509
+    };
+
+    if ((ctx && !SSL_CTX_set1_server_cert_type(ctx, cert_types_rpk,
+					       sizeof(cert_types_rpk))) ||
+	(ssl && !SSL_set1_server_cert_type(ssl, cert_types_rpk,
+					   sizeof(cert_types_rpk)))) {
+	if (warned++) {
+	    ERR_clear_error();
+	    return;
+	}
+	msg_warn("Failed to enable server to client raw public key support");
+	tls_print_errors();
+    }
+#endif
 }
 
 #else

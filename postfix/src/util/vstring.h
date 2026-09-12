@@ -62,6 +62,7 @@ CHECK_VAL_HELPER_DCL(VSTRING_CTL, ssize_t);
 
 /* Flags 24..31 are reserved for VSTRING. */
 #define VSTRING_FLAG_EXACT	(1<<24)	/* exact allocation for tests */
+#define VSTRING_FLAG_MASK	(255U << 24)
 
  /*
   * Macros. Unsafe macros have UPPERCASE names.
@@ -90,8 +91,10 @@ CHECK_VAL_HELPER_DCL(VSTRING_CTL, ssize_t);
   */
 #ifdef VSTRING_INTERNAL
 #define VSTRING_AT_OFFSET(vp, offset) do { \
-	(vp)->vbuf.ptr = (vp)->vbuf.data + (offset); \
-	(vp)->vbuf.cnt = (vp)->vbuf.len - (offset); \
+	VSTRING *__vp__ = (vp); \
+	ssize_t __offset__ = (offset); \
+	(__vp__)->vbuf.ptr = (__vp__)->vbuf.data + (__offset__); \
+	(__vp__)->vbuf.cnt = (__vp__)->vbuf.len - (__offset__); \
     } while (0)
 #endif
 

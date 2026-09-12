@@ -4,7 +4,7 @@
 #! ../bin/postmap smtpd_check_access
 #msg_verbose 1
 smtpd_delay_reject 0
-mynetworks 127.0.0.0/8,168.100.189.0/28
+mynetworks 127.0.0.0/8,168.100.3.0/28
 relay_domains porcupine.org
 maps_rbl_domains dnsbltest.porcupine.org
 rbl_reply_maps hash:smtpd_check_access
@@ -14,13 +14,13 @@ helo foobar
 #
 mail sname@sdomain
 recipient_restrictions reject_maps_rbl
-client spike.porcupine.org 168.100.189.2
+client spike.porcupine.org 168.100.3.2
 rcpt rname@rdomain
 client foo 127.0.0.2
 rcpt rname@rdomain
 #
 recipient_restrictions reject_rbl_client,dnsbltest.porcupine.org
-client spike.porcupine.org 168.100.189.2
+client spike.porcupine.org 168.100.3.2
 rcpt rname@rdomain
 client foo 127.0.0.2
 rcpt rname@rdomain
@@ -29,11 +29,14 @@ client foo 127.0.0.2
 rcpt rname@rdomain
 client foo 127.0.0.1
 rcpt rname@rdomain
+recipient_restrictions reject_rbl_client,dnsbltest.porcupine.org=127.0.0.3
+client foo 127.0.0.3
+rcpt rname@rdomain
 #
 # RHSBL sender domain name
 #
 recipient_restrictions reject_rhsbl_sender,rhsbl.porcupine.org
-client spike.porcupine.org 168.100.189.2
+client spike.porcupine.org 168.100.3.2
 mail sname@example.tld
 rcpt rname@rdomain
 mail sname@sdomain
@@ -49,7 +52,7 @@ rcpt rname@rdomain
 # RHSBL recipient domain name
 #
 recipient_restrictions reject_rhsbl_recipient,rhsbl.porcupine.org
-client spike.porcupine.org 168.100.189.2
+client spike.porcupine.org 168.100.3.2
 mail sname@sdomain
 rcpt rname@rdomain
 rcpt rname@example.tld
@@ -59,4 +62,16 @@ rcpt rname@example.tld
 recipient_restrictions reject_rhsbl_helo,rhsbl.porcupine.org
 helo example.tld
 mail sname@sdomain
+rcpt rname@rdomain
+#
+# rbl_reply_maps lookup error
+#
+smtpd_delay_reject 0
+mynetworks 127.0.0.0/8,168.100.3.0/28
+relay_domains porcupine.org
+rbl_reply_maps fail:1_rbl_reply_maps
+helo foobar
+mail sname@sdomain
+recipient_restrictions reject_rbl_client,dnsbltest.porcupine.org
+client foo 127.0.0.2
 rcpt rname@rdomain

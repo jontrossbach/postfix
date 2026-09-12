@@ -27,14 +27,47 @@
 #define MAC_EXP_FLAG_PRINTABLE  (1<<3)
 
  /*
+  * Token codes, public so tha they are available to mac_expand_add_relop()
+  */
+#define MAC_EXP_OP_TOK_NONE	0	/* Sentinel */
+#define MAC_EXP_OP_TOK_EQ	1	/* == */
+#define MAC_EXP_OP_TOK_NE	2	/* != */
+#define MAC_EXP_OP_TOK_LT	3	/* < */
+#define MAC_EXP_OP_TOK_LE	4	/* <= */
+#define MAC_EXP_OP_TOK_GE	5	/* >= */
+#define MAC_EXP_OP_TOK_GT	6	/* > */
+
+ /*
+  * Relational operator results. An enum to discourage assuming that 0 is
+  * false, !0 is true.
+  */
+typedef enum MAC_EXP_OP_RES {
+    MAC_EXP_OP_RES_TRUE,
+    MAC_EXP_OP_RES_FALSE,
+    MAC_EXP_OP_RES_ERROR,
+}       MAC_EXP_OP_RES;
+
+
+extern MAC_EXP_OP_RES mac_exp_op_res_bool[2];
+
+ /*
   * Real lookup or just a test?
   */
 #define MAC_EXP_MODE_TEST	(0)
 #define MAC_EXP_MODE_USE	(1)
 
 typedef const char *(*MAC_EXP_LOOKUP_FN) (const char *, int, void *);
+typedef bool(*MAC_EXP_DONT_PARSE_FN) (const char *, void *);
+typedef MAC_EXP_OP_RES(*MAC_EXPAND_RELOP_FN) (const char *, int, const char *);
+typedef int (*MAC_EXPAND_NAMED_FN) (VSTRING *, const char *);
 
-extern int mac_expand(VSTRING *, const char *, int, const char *, MAC_EXP_LOOKUP_FN, void *);
+extern int mac_expand7(VSTRING *, const char *, int, const char *, MAC_EXP_LOOKUP_FN, MAC_EXP_DONT_PARSE_FN, void *);
+extern void mac_expand_add_relop(int *, const char *, MAC_EXPAND_RELOP_FN);
+extern void mac_expand_add_named_fn(const char *, MAC_EXPAND_NAMED_FN);
+
+#define mac_expand(res, pat, flags, filter, lookup, ctx) \
+    mac_expand7((res), (pat), (flags), (filter), (lookup), \
+	(MAC_EXP_DONT_PARSE_FN) 0, (ctx))
 
 /* LICENSE
 /* .ad
@@ -50,6 +83,9 @@ extern int mac_expand(VSTRING *, const char *, int, const char *, MAC_EXP_LOOKUP
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 #endif

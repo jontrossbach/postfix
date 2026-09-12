@@ -80,6 +80,8 @@
 /* .IP CLEANUP_FLAG_AUTOUTF8
 /*	Autodetection: request SMTPUTF8 support if the message
 /*	contains an UTF8 message header, sender, or recipient.
+/* .IP CLEANUP_FLAG_REQTLS
+/*	The sender requested REQUIRETLS (RFC 8689) enforcement.
 /* DIAGNOSTICS
 /*	Problems and transactions are logged to \fBsyslogd\fR(8)
 /*	or \fBpostlogd\fR(8).
@@ -100,6 +102,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -199,14 +204,23 @@ void    cleanup_control(CLEANUP_STATE *state, int flags)
      * definition.
      */
     if (msg_verbose)
-	msg_info("cleanup flags = %s", cleanup_strflags(flags));
+	msg_info("client flags = %s", cleanup_strflags(flags));
     if ((state->flags = flags) & CLEANUP_FLAG_BOUNCE) {
 	state->err_mask = CLEANUP_STAT_MASK_INCOMPLETE;
     } else {
 	state->err_mask = ~0;
     }
+
+    /*
+     * Propagate requests that are specified at the envelope level. This may
+     * be augmented later with information derived from message content.
+     */
     if (state->flags & CLEANUP_FLAG_SMTPUTF8)
-	state->smtputf8 = SMTPUTF8_FLAG_REQUESTED;
+	state->sendopts |= SMTPUTF8_FLAG_REQUESTED;
+    if (state->flags & CLEANUP_FLAG_REQTLS)
+	state->sendopts |= SOPT_REQUIRETLS_ESMTP;
+    if (msg_verbose)
+	msg_info("server flags = %s", cleanup_strflags(state->flags));
 }
 
 /* cleanup_flush - finish queue file */
@@ -261,8 +275,8 @@ int     cleanup_flush(CLEANUP_STATE *state)
      * (mail submitted with the Postfix sendmail command, mail forwarded by
      * the local(8) delivery agent, or mail re-queued with "postsuper -r"),
      * send a bounce notification, reset the error flags in case of success,
-     * and request deletion of the the incoming queue file and of the
-     * optional DSN SUCCESS records from virtual alias expansion.
+     * and request deletion of the incoming queue file and of the optional
+     * DSN SUCCESS records from virtual alias expansion.
      * 
      * XXX It would make no sense to knowingly report success after we already
      * have bounced all recipients, especially because the information in the
@@ -354,6 +368,8 @@ int     cleanup_flush(CLEANUP_STATE *state)
 	    (void) REMOVE(vstring_str(cleanup_trace_path));
 	if (REMOVE(cleanup_path))
 	    msg_warn("remove %s: %m", cleanup_path);
+	msg_info("%s: removed (%s)", state->queue_id, state->errs ?
+		 "canceled" : "discarded");
     }
 
     /*

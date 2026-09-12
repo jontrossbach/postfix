@@ -49,6 +49,14 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -79,15 +87,13 @@
 
 static int deliver_pass_initial_reply(VSTREAM *stream)
 {
-    int     stat;
-
     if (attr_scan(stream, ATTR_FLAG_STRICT,
-		  RECV_ATTR_INT(MAIL_ATTR_STATUS, &stat),
-		  ATTR_TYPE_END) != 1) {
+		  RECV_ATTR_STREQ(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_DELIVER),
+		  ATTR_TYPE_END) != 0) {
 	msg_warn("%s: malformed response", VSTREAM_PATH(stream));
-	stat = -1;
+	return (-1);
     }
-    return (stat);
+    return (0);
 }
 
 /* deliver_pass_send_request - send delivery request to delivery process */
@@ -106,11 +112,11 @@ static int deliver_pass_send_request(VSTREAM *stream, DELIVER_REQUEST *request,
 	       SEND_ATTR_LONG(MAIL_ATTR_SIZE, request->data_size),
 	       SEND_ATTR_STR(MAIL_ATTR_NEXTHOP, nexthop),
 	       SEND_ATTR_STR(MAIL_ATTR_ENCODING, request->encoding),
-	       SEND_ATTR_INT(MAIL_ATTR_SMTPUTF8, request->smtputf8),
+	       SEND_ATTR_INT(MAIL_ATTR_SENDOPTS, request->sendopts),
 	       SEND_ATTR_STR(MAIL_ATTR_SENDER, request->sender),
 	       SEND_ATTR_STR(MAIL_ATTR_DSN_ENVID, request->dsn_envid),
 	       SEND_ATTR_INT(MAIL_ATTR_DSN_RET, request->dsn_ret),
-	       SEND_ATTR_FUNC(msg_stats_print, (void *) &request->msg_stats),
+	SEND_ATTR_FUNC(msg_stats_print, (const void *) &request->msg_stats),
     /* XXX Should be encapsulated with ATTR_TYPE_FUNC. */
 	     SEND_ATTR_STR(MAIL_ATTR_LOG_CLIENT_NAME, request->client_name),
 	     SEND_ATTR_STR(MAIL_ATTR_LOG_CLIENT_ADDR, request->client_addr),
@@ -127,7 +133,7 @@ static int deliver_pass_send_request(VSTREAM *stream, DELIVER_REQUEST *request,
 	       SEND_ATTR_INT(MAIL_ATTR_RCPT_COUNT, 1),
 	       ATTR_TYPE_END);
     attr_print(stream, ATTR_FLAG_NONE,
-	       SEND_ATTR_FUNC(rcpt_print, (void *) rcpt),
+	       SEND_ATTR_FUNC(rcpt_print, (const void *) rcpt),
 	       ATTR_TYPE_END);
 
     if (vstream_fflush(stream)) {
@@ -204,13 +210,13 @@ int     deliver_pass(const char *class, const char *service,
 	(void) DSN_SIMPLE(&dsn, "4.3.0", "mail transport unavailable");
 	status = defer_append(DEL_REQ_TRACE_FLAGS(request->flags),
 			      request->queue_id, &request->msg_stats,
-			      rcpt, "none", &dsn);
+			      rcpt, "none", NO_TLS_STATS, &dsn);
     } else if ((status = deliver_pass_final_reply(stream, dsb))
 	       == DELIVER_PASS_UNKNOWN) {
 	(void) DSN_SIMPLE(&dsn, "4.3.0", "unknown mail transport error");
 	status = defer_append(DEL_REQ_TRACE_FLAGS(request->flags),
 			      request->queue_id, &request->msg_stats,
-			      rcpt, "none", &dsn);
+			      rcpt, "none", NO_TLS_STATS, &dsn);
     }
 
     /*

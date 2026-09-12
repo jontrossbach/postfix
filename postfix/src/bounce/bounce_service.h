@@ -24,6 +24,11 @@
 #include <bounce_template.h>
 
  /*
+  * bounce_service.c
+  */
+extern int bounce_hfrom_format;
+
+ /*
   * bounce_append_service.c
   */
 extern int bounce_append_service(int, char *, char *, RECIPIENT *, DSN *);
@@ -80,11 +85,12 @@ typedef struct {
     long    orig_offs;			/* start of content */
     time_t  arrival_time;		/* time of arrival */
     long    message_size;		/* size of content */
+    VSTRING *orig_msgid;		/* original message-id */
     RCPT_BUF *rcpt_buf;			/* recipient info */
     DSN_BUF *dsn_buf;			/* delivery status info */
     BOUNCE_LOG *log_handle;		/* open logfile */
     char   *mail_name;			/* $mail_name, cooked */
-    int     smtputf8;			/* SMTPUTF8 requested */
+    int     sendopts;			/* smtputf8, requiretls, etc. */
 } BOUNCE_INFO;
 
  /* */

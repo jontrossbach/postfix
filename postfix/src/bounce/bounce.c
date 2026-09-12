@@ -124,6 +124,29 @@
 /*	Available in Postfix 3.3 and later:
 /* .IP "\fBservice_name (read-only)\fR"
 /*	The master.cf service name of a Postfix daemon process.
+/* .PP
+/*	Available in Postfix 3.6 and later:
+/* .IP "\fBenable_threaded_bounces (no)\fR"
+/*	Enable non-delivery, success, and delay notifications that link
+/*	to the original message by including a References: and In-Reply-To:
+/*	header with the original Message-ID value.
+/* .PP
+/*	Available in Postfix 3.7 and later:
+/* .IP "\fBheader_from_format (standard)\fR"
+/*	The format of the Postfix-generated \fBFrom:\fR header.
+/* .PP
+/*	Available in Postfix 3.10 and later:
+/* .IP "\fBtls_required_enable (yes)\fR"
+/*	Enable support for the "TLS-Required: no" message header, defined
+/*	in RFC 8689.
+/* .PP
+/*	Available in Postfix 3.11 and later:
+/* .IP "\fBrequiretls_redact_dsn (yes)\fR"
+/*	When sending a delivery status notification for an original
+/*	message received with the REQUIRETLS option, do not send the original
+/*	message body (as if that message was received with "RET=HDRS") and
+/*	do not enforce REQUIRETLS (as if that message was received without
+/*	REQUIRETLS).
 /* FILES
 /*	/var/spool/postfix/bounce/* non-delivery records
 /*	/var/spool/postfix/defer/* non-delivery records
@@ -150,6 +173,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -177,6 +203,9 @@
 #include <mail_addr.h>
 #include <rcpt_buf.h>
 #include <dsb_scan.h>
+#include <hfrom_format.h>
+#include <sendopts.h>
+#include <dsn_mask.h>
 
 /* Single-threaded server skeleton. */
 
@@ -197,6 +226,9 @@ char   *var_bounce_rcpt;
 char   *var_2bounce_rcpt;
 char   *var_delay_rcpt;
 char   *var_bounce_tmpl;
+bool    var_threaded_bounce;
+char   *var_hfrom_format;		/* header_from_format */
+bool    var_reqtls_redact_dsn;
 
  /*
   * We're single threaded, so we can avoid some memory allocation overhead.
@@ -214,6 +246,11 @@ static DSN_BUF *dsn_buf;
   * Templates.
   */
 BOUNCE_TEMPLATES *bounce_templates;
+
+ /*
+  * From: header format.
+  */
+int     bounce_hfrom_format;
 
 #define STR vstring_str
 
@@ -286,6 +323,27 @@ static int bounce_append_proto(char *service_name, VSTREAM *client)
 				  &rcpt_buf->rcpt, &dsn_buf->dsn));
 }
 
+/* edit_notification_properties - bounce message filter */
+
+static void edit_notification_properties(int *sendopts, int *dsn_ret)
+{
+
+    /*
+     * If REQUIRETLS is requested, do not propagate "TLS-Required: no". See
+     * also down-stream code in bounce_header().
+     */
+    if (*sendopts & SOPT_REQUIRETLS_ESMTP)
+	*sendopts &= ~SOPT_REQUIRETLS_HEADER;
+
+    /*
+     * Redact delivery status notification for REQUIRETLS message.
+     */
+    if (var_reqtls_redact_dsn && (*sendopts & SOPT_REQUIRETLS_ESMTP)) {
+	*sendopts &= ~SOPT_REQUIRETLS_ESMTP;
+	*dsn_ret = DSN_RET_HDRS;
+    }
+}
+
 /* bounce_notify_proto - bounce_notify server protocol */
 
 static int bounce_notify_proto(char *service_name, VSTREAM *client,
@@ -295,7 +353,7 @@ static int bounce_notify_proto(char *service_name, VSTREAM *client,
 {
     const char *myname = "bounce_notify_proto";
     int     flags;
-    int     smtputf8;
+    int     sendopts;
     int     dsn_ret;
 
     /*
@@ -306,7 +364,7 @@ static int bounce_notify_proto(char *service_name, VSTREAM *client,
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUE, queue_name),
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUEID, queue_id),
 			    RECV_ATTR_STR(MAIL_ATTR_ENCODING, encoding),
-			    RECV_ATTR_INT(MAIL_ATTR_SMTPUTF8, &smtputf8),
+			    RECV_ATTR_INT(MAIL_ATTR_SENDOPTS, &sendopts),
 			    RECV_ATTR_STR(MAIL_ATTR_SENDER, sender),
 			    RECV_ATTR_STR(MAIL_ATTR_DSN_ENVID, dsn_envid),
 			    RECV_ATTR_INT(MAIL_ATTR_DSN_RET, &dsn_ret),
@@ -330,9 +388,9 @@ static int bounce_notify_proto(char *service_name, VSTREAM *client,
     VS_NEUTER(sender);
     VS_NEUTER(dsn_envid);
     if (msg_verbose)
-	msg_info("%s: flags=0x%x service=%s queue=%s id=%s encoding=%s smtputf8=%d sender=%s envid=%s ret=0x%x",
+	msg_info("%s: flags=0x%x service=%s queue=%s id=%s encoding=%s sendopts=%d sender=%s envid=%s ret=0x%x",
 		 myname, flags, service_name, STR(queue_name), STR(queue_id),
-		 STR(encoding), smtputf8, STR(sender), STR(dsn_envid),
+		 STR(encoding), sendopts, STR(sender), STR(dsn_envid),
 		 dsn_ret);
 
     /*
@@ -343,10 +401,16 @@ static int bounce_notify_proto(char *service_name, VSTREAM *client,
 	bounce_cleanup_register(service_name, STR(queue_id));
 
     /*
+     * Handle REQUIRETLS etc. matters.
+     */
+    if (var_reqtls_enable && (sendopts & SOPT_REQUIRETLS_ALL))
+	edit_notification_properties(&sendopts, &dsn_ret);
+
+    /*
      * Execute the request.
      */
     return (service(flags, service_name, STR(queue_name),
-		    STR(queue_id), STR(encoding), smtputf8,
+		    STR(queue_id), STR(encoding), sendopts,
 		    STR(sender), STR(dsn_envid), dsn_ret,
 		    bounce_templates));
 }
@@ -357,7 +421,7 @@ static int bounce_verp_proto(char *service_name, VSTREAM *client)
 {
     const char *myname = "bounce_verp_proto";
     int     flags;
-    int     smtputf8;
+    int     sendopts;
     int     dsn_ret;
 
     /*
@@ -368,7 +432,7 @@ static int bounce_verp_proto(char *service_name, VSTREAM *client)
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUE, queue_name),
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUEID, queue_id),
 			    RECV_ATTR_STR(MAIL_ATTR_ENCODING, encoding),
-			    RECV_ATTR_INT(MAIL_ATTR_SMTPUTF8, &smtputf8),
+			    RECV_ATTR_INT(MAIL_ATTR_SENDOPTS, &sendopts),
 			    RECV_ATTR_STR(MAIL_ATTR_SENDER, sender),
 			    RECV_ATTR_STR(MAIL_ATTR_DSN_ENVID, dsn_envid),
 			    RECV_ATTR_INT(MAIL_ATTR_DSN_RET, &dsn_ret),
@@ -398,9 +462,9 @@ static int bounce_verp_proto(char *service_name, VSTREAM *client)
 	return (-1);
     }
     if (msg_verbose)
-	msg_info("%s: flags=0x%x service=%s queue=%s id=%s encoding=%s smtputf8=%d sender=%s envid=%s ret=0x%x delim=%s",
+	msg_info("%s: flags=0x%x service=%s queue=%s id=%s encoding=%s sendopts=%d sender=%s envid=%s ret=0x%x delim=%s",
 		 myname, flags, service_name, STR(queue_name),
-		 STR(queue_id), STR(encoding), smtputf8, STR(sender),
+		 STR(queue_id), STR(encoding), sendopts, STR(sender),
 		 STR(dsn_envid), dsn_ret, STR(verp_delims));
 
     /*
@@ -411,6 +475,12 @@ static int bounce_verp_proto(char *service_name, VSTREAM *client)
 	bounce_cleanup_register(service_name, STR(queue_id));
 
     /*
+     * Handle REQUIRETLS etc. matters.
+     */
+    if (var_reqtls_enable && (sendopts & SOPT_REQUIRETLS_ALL))
+	edit_notification_properties(&sendopts, &dsn_ret);
+
+    /*
      * Execute the request. Fall back to traditional notification if a bounce
      * was returned as undeliverable, because we don't want to VERPify those.
      */
@@ -418,12 +488,12 @@ static int bounce_verp_proto(char *service_name, VSTREAM *client)
 					  mail_addr_double_bounce())) {
 	msg_warn("request to send VERP-style notification of bounced mail");
 	return (bounce_notify_service(flags, service_name, STR(queue_name),
-				      STR(queue_id), STR(encoding), smtputf8,
+				      STR(queue_id), STR(encoding), sendopts,
 				      STR(sender), STR(dsn_envid), dsn_ret,
 				      bounce_templates));
     } else
 	return (bounce_notify_verp(flags, service_name, STR(queue_name),
-				   STR(queue_id), STR(encoding), smtputf8,
+				   STR(queue_id), STR(encoding), sendopts,
 				   STR(sender), STR(dsn_envid), dsn_ret,
 				   STR(verp_delims), bounce_templates));
 }
@@ -434,7 +504,7 @@ static int bounce_one_proto(char *service_name, VSTREAM *client)
 {
     const char *myname = "bounce_one_proto";
     int     flags;
-    int     smtputf8;
+    int     sendopts;
     int     dsn_ret;
 
     /*
@@ -445,7 +515,7 @@ static int bounce_one_proto(char *service_name, VSTREAM *client)
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUE, queue_name),
 			    RECV_ATTR_STR(MAIL_ATTR_QUEUEID, queue_id),
 			    RECV_ATTR_STR(MAIL_ATTR_ENCODING, encoding),
-			    RECV_ATTR_INT(MAIL_ATTR_SMTPUTF8, &smtputf8),
+			    RECV_ATTR_INT(MAIL_ATTR_SENDOPTS, &sendopts),
 			    RECV_ATTR_STR(MAIL_ATTR_SENDER, sender),
 			    RECV_ATTR_STR(MAIL_ATTR_DSN_ENVID, dsn_envid),
 			    RECV_ATTR_INT(MAIL_ATTR_DSN_RET, &dsn_ret),
@@ -494,19 +564,25 @@ static int bounce_one_proto(char *service_name, VSTREAM *client)
      * RECIPIENT_FROM_RCPT_BUF().
      */
     if (msg_verbose)
-	msg_info("%s: flags=0x%x queue=%s id=%s encoding=%s smtputf8=%d sender=%s envid=%s dsn_ret=0x%x orig_to=%s to=%s off=%ld dsn_orig=%s notif=0x%x stat=%s act=%s why=%s",
+	msg_info("%s: flags=0x%x queue=%s id=%s encoding=%s sendopts=%d sender=%s envid=%s dsn_ret=0x%x orig_to=%s to=%s off=%ld dsn_orig=%s notif=0x%x stat=%s act=%s why=%s",
 		 myname, flags, STR(queue_name), STR(queue_id),
-		 STR(encoding), smtputf8, STR(sender), STR(dsn_envid),
+		 STR(encoding), sendopts, STR(sender), STR(dsn_envid),
 		 dsn_ret, STR(rcpt_buf->orig_addr), STR(rcpt_buf->address),
 		 rcpt_buf->offset, STR(rcpt_buf->dsn_orcpt),
 		 rcpt_buf->dsn_notify, STR(dsn_buf->status),
 		 STR(dsn_buf->action), STR(dsn_buf->reason));
 
     /*
+     * Handle REQUIRETLS etc. matters.
+     */
+    if (var_reqtls_enable && (sendopts & SOPT_REQUIRETLS_ALL))
+	edit_notification_properties(&sendopts, &dsn_ret);
+
+    /*
      * Execute the request.
      */
     return (bounce_one_service(flags, STR(queue_name), STR(queue_id),
-			       STR(encoding), smtputf8, STR(sender),
+			       STR(encoding), sendopts, STR(sender),
 			       STR(dsn_envid), dsn_ret, rcpt_buf,
 			       dsn_buf, bounce_templates));
 }
@@ -526,6 +602,14 @@ static void bounce_service(VSTREAM *client, char *service_name, char **argv)
 	msg_fatal("unexpected command-line argument: %s", argv[0]);
     if (mail_queue_name_ok(service_name) == 0)
 	msg_fatal("malformed service name: %s", service_name);
+
+    /*
+     * Announce the protocol.
+     */
+    attr_print(client, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_BOUNCE),
+	       ATTR_TYPE_END);
+    (void) vstream_fflush(client);
 
     /*
      * Read and validate the first parameter of the client request. Let the
@@ -605,6 +689,7 @@ static void pre_jail_init(char *unused_name, char **unused_argv)
 
 static void post_jail_init(char *service_name, char **unused_argv)
 {
+    bounce_hfrom_format = hfrom_format_parse(VAR_HFROM_FORMAT, var_hfrom_format);
 
     /*
      * Special case: dump bounce templates. This is not part of the master(5)
@@ -658,6 +743,12 @@ int     main(int argc, char **argv)
 	VAR_2BOUNCE_RCPT, DEF_2BOUNCE_RCPT, &var_2bounce_rcpt, 1, 0,
 	VAR_DELAY_RCPT, DEF_DELAY_RCPT, &var_delay_rcpt, 1, 0,
 	VAR_BOUNCE_TMPL, DEF_BOUNCE_TMPL, &var_bounce_tmpl, 0, 0,
+	VAR_HFROM_FORMAT, DEF_HFROM_FORMAT, &var_hfrom_format, 1, 0,
+	0,
+    };
+    static const CONFIG_NBOOL_TABLE nbool_table[] = {
+	VAR_THREADED_BOUNCE, DEF_THREADED_BOUNCE, &var_threaded_bounce,
+	VAR_REQTLS_REDACT_DSN, DEF_REQTLS_REDACT_DSN, &var_reqtls_redact_dsn,
 	0,
     };
 
@@ -673,6 +764,7 @@ int     main(int argc, char **argv)
 		       CA_MAIL_SERVER_INT_TABLE(int_table),
 		       CA_MAIL_SERVER_STR_TABLE(str_table),
 		       CA_MAIL_SERVER_TIME_TABLE(time_table),
+		       CA_MAIL_SERVER_NBOOL_TABLE(nbool_table),
 		       CA_MAIL_SERVER_PRE_INIT(pre_jail_init),
 		       CA_MAIL_SERVER_POST_INIT(post_jail_init),
 		       CA_MAIL_SERVER_UNLIMITED,

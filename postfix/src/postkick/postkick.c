@@ -54,7 +54,7 @@
 /*	How long the \fBpostkick\fR(1) command waits for a request to enter the
 /*	Postfix daemon process input buffer before giving up.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
@@ -157,6 +157,11 @@ int     main(int argc, char **argv)
 	argv[0] = slash + 1;
     msg_vstream_init(argv[0], VSTREAM_ERR);
     set_mail_conf_str(VAR_PROCNAME, var_procname = mystrdup(argv[0]));
+
+    /*
+     * Check the Postfix library version as soon as we enable logging.
+     */
+    MAIL_VERSION_CHECK;
 
     /*
      * Parse JCL.

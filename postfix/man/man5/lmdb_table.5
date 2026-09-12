@@ -47,9 +47,9 @@ email addresses without the localpart, address extension
 or domain portion.  This behavior is also found with, for
 example, btree:, hash:, or ldap: tables.
 
-Unlike other flat\-file Postfix databases, changes to
-an LMDB database do not trigger automatic daemon program
-restart, and do not require "\fBpostfix reload\fR".
+Changes to an LMDB database do not trigger an automatic
+daemon restart, and do not require a daemon restart with
+"\fBpostfix reload\fR".
 .SH "RELIABILITY"
 .na
 .nf
@@ -72,16 +72,17 @@ postscreen(8) services.
 .fi
 The Postfix LMDB adapter does not use LMDB's built\-in locking
 scheme, because that would require world\-writable lockfiles
-and would violate the Postfix security model.  Instead,
+and therefore violate the Postfix security model.  Instead,
 Postfix uses fcntl(2) locks with whole\-file granularity.
 Programs that use LMDB's built\-in locking protocol will
 corrupt a Postfix LMDB database or will read garbage.
 
 Every Postfix LMDB database read or write transaction must
 be protected from start to end with a shared or exclusive
-fcntl(2) lock.  A writer may atomically downgrade an exclusive
-lock to a shared lock, but it must hold an exclusive lock
-while opening another write transaction.
+fcntl(2) lock. A process may atomically downgrade an exclusive
+lock to a shared lock before opening a database read transaction,
+but it must hold an exclusive lock while opening a write
+transaction.
 
 Note that fcntl(2) locks do not protect transactions within
 the same process against each other.  If a program cannot
@@ -96,8 +97,8 @@ to the per\-process fcntl(2) locks.
 Short\-lived programs automatically pick up changes to
 main.cf.  With long\-running daemon programs, Use the command
 "\fBpostfix reload\fR" after a configuration change.
-.IP "\fBlmdb_map_size (default: 16777216)\fR"
-The initial LMDB database size limit in bytes.
+.IP "\fBlmdb_map_size (16777216)\fR"
+The initial OpenLDAP LMDB database size limit in bytes.
 .SH "SEE ALSO"
 .na
 .nf

@@ -18,9 +18,9 @@ Probe the TLS properties of an ESMTP or LMTP server.
 and reports TLS\-related information about the server. With SMTP, the
 destination is a domainname; with LMTP it is either a domainname
 prefixed with \fBinet:\fR or a pathname prefixed with \fBunix:\fR.  If
-Postfix is built without TLS support, the resulting posttls\-finger
+Postfix is built without TLS support, the resulting \fBposttls\-finger\fR(1)
 program has very limited functionality, and only the \fB\-a\fR, \fB\-c\fR,
-\fB\-h\fR, \fB\-o\fR, \fB\-S\fR, \fB\-t\fR, \fB\-T\fR and \fB\-v\fR options
+\fB\-h\fR, \fB\-S\fR, \fB\-t\fR, \fB\-T\fR and \fB\-v\fR options
 are available.
 
 Note: this is an unsupported test program. No attempt is made
@@ -84,9 +84,9 @@ SMTP. The default TCP port for LMTP is 24.
 Arguments:
 .IP "\fB\-a\fR \fIfamily\fR (default: \fBany\fR)"
 Address family preference: \fBipv4\fR, \fBipv6\fR or \fBany\fR.  When
-using \fBany\fR, posttls\-finger will randomly select one of the two as
-the more preferred, and exhaust all MX preferences for the first
-address family before trying any addresses for the other.
+using \fBany\fR, \fBposttls\-finger\fR(1) will randomly select one of
+the two as the more preferred, and exhaust all MX preferences for the
+first address family before trying any addresses for the other.
 .IP "\fB\-A\fR \fItrust\-anchor.pem\fR (default: none)"
 A list of PEM trust\-anchor files that overrides CAfile and CApath
 trust chain verification.  Specify the option multiple times to
@@ -107,9 +107,9 @@ The message digest algorithm to use for reporting remote SMTP server
 fingerprints and matching against user provided certificate
 fingerprints (with DANE TLSA records the algorithm is specified
 in the DNS).  In Postfix versions prior to 3.6, the default value
-was "sha1".
+was "md5".
 .IP "\fB\-f\fR"
-Lookup the associated DANE TLSA RRset even when a hostname is not an
+Look up the associated DANE TLSA RRset even when a hostname is not an
 alias and its address records lie in an unsigned zone.  See
 smtp_tls_force_insecure_host_tlsa_lookup for details.
 .IP "\fB\-F \fICAfile.pem\fR (default: none)"
@@ -117,8 +117,8 @@ The PEM formatted CAfile for remote SMTP server certificate
 verification.  By default no CAfile is used and no public CAs
 are trusted.
 .IP "\fB\-g \fIgrade\fR (default: medium)"
-The minimum TLS cipher grade used by posttls\-finger.  See
-smtp_tls_mandatory_ciphers for details.
+The minimum TLS cipher grade used by \fBposttls\-finger\fR(1).
+See smtp_tls_mandatory_ciphers for details.
 .IP "\fB\-h \fIhost_lookup\fR (default: \fBdns\fR)"
 The hostname lookup methods used for the connection.  See the
 documentation of smtp_host_lookup for syntax and semantics.
@@ -148,7 +148,7 @@ TLSA records are found, or all the records found are unusable, the
 security level allows you to test certificate or public\-key
 fingerprint matches before you deploy them in the policy table.
 .IP
-Note, since \fBposttls\-finger\fR does not actually deliver any email,
+Note, since \fBposttls\-finger\fR(1) does not actually deliver any email,
 the \fBnone\fR, \fBmay\fR and \fBencrypt\fR security levels are not
 very useful.  Since \fBmay\fR and \fBencrypt\fR don't require peer
 certificates, they will often negotiate anonymous TLS ciphersuites,
@@ -180,12 +180,26 @@ For experts only.
 These synonymous values combine ssl\-expert with ssl\-session\-packet\-dump.
 For experts only, and in most cases, use wireshark instead.
 .IP "\fBssl\-debug\fR"
-Turn on OpenSSL logging of the progress of the SSL handshake.
+Turn on OpenSSL logging of the progress of the SSL handshake.  This
+includes detailed output of decoded handshake messages.
 .IP "\fBssl\-handshake\-packet\-dump\fR"
 Log hexadecimal packet dumps of the SSL handshake; for experts only.
 .IP "\fBssl\-session\-packet\-dump\fR"
 Log hexadecimal packet dumps of the entire SSL session; only useful
 to those who can debug SSL protocol problems from hex dumps.
+.IP "\fBtrace\fR"
+Available with Postfix 3.12 and later. Write a human\-readable
+protocol transcript of the TLS session to a file in the current
+directory. The file is named
+\fIprocess_name\fR\-\fIdate_time\fR.\fIusec\fR\-\fIpeer\fR\-\fIXXXXXX\fR,
+where \fIXXXXXX\fR is replaced with a unique string to avoid
+filename conflicts. All reconnect attempts in a single
+command\-line run share the same trace file, separated by "===
+posttls\-finger reconnect ===" lines. When \fB\-X\fR is in effect,
+tlsproxy(8) generates the trace file under
+\fI$queue_directory\fR/tlstrace/ instead. The keyword is
+ignored with a warning if Postfix or OpenSSL was built without
+TLS trace support.
 .IP "\fBuntrusted\fR"
 Logs trust chain verification problems.  This is turned on
 automatically at security levels that use peer names signed
@@ -224,14 +238,14 @@ response; with these servers there will never be more than
 The TLS policy for MX hosts with "secure" TLSA records when the
 nexthop destination security level is \fBdane\fR, but the MX
 record was found via an "insecure" MX lookup.  See the main.cf
-documentation for smtp_tls_insecure_mx_policy for details.
+documentation for smtp_tls_dane_insecure_mx_policy for details.
 .IP "\fB\-o \fIname=value\fR"
 Specify zero or more times to override the value of the main.cf
 parameter \fIname\fR with \fIvalue\fR.  Possible use\-cases include
 overriding the values of TLS library parameters, or "myhostname" to
 configure the SMTP EHLO name sent to the remote server.
 .IP "\fB\-p \fIprotocols\fR (default: >=TLSv1)"
-TLS protocols that posttls\-finger will exclude or include.  See
+TLS protocols that \fBposttls\-finger\fR(1) will exclude or include.  See
 smtp_tls_mandatory_protocols for details.
 .IP "\fB\-P \fICApath/\fR (default: none)"
 The OpenSSL CApath/ directory (indexed via c_rehash(1)) for remote
@@ -243,6 +257,8 @@ seconds. Report whether the session is re\-used. Retry if a new server
 is encountered, up to 5 times or as specified with the \fB\-m\fR option.
 By default reconnection is disabled, specify a positive delay to
 enable this behavior.
+.IP "\fB\-R\fR"
+Use SRV lookup instead of MX.
 .IP "\fB\-s \fIservername\fR"
 The server name to send with the TLS Server Name Indication (SNI)
 extension.  When the server has DANE TLSA records, this parameter
@@ -263,11 +279,20 @@ The SMTP/LMTP command timeout for EHLO/LHLO, STARTTLS and QUIT.
 Enable verbose Postfix logging.  Specify more than once to increase
 the level of verbose logging.
 .IP "\fB\-w\fR"
-Enable outgoing TLS wrapper mode, or SMTPS support.  This is typically
-provided on port 465 by servers that are compatible with the ad\-hoc
-SMTP in SSL protocol, rather than the standard STARTTLS protocol.
-The destination \fIdomain\fR:\fIport\fR should of course provide such
+Enable outgoing TLS wrapper mode, or SUBMISSIONS/SMTPS support.  This
+is typically provided on port 465 by servers that are compatible with
+the SMTP\-in\-SSL protocol, rather than the STARTTLS protocol.
+The destination \fIdomain\fR:\fIport\fR must of course provide such
 a service.
+.IP "\fB\-x\fR"
+Prefer RFC7250 non\-X.509 raw public key (RPK) server credentials.  By
+default only X.509 certificates are accepted.  This is analogous to
+setting \fBsmtp_tls_enable_rpk = yes\fR in the smtp(8) client.  At the
+fingerprint security level, when raw public keys are enabled, only
+public key (and not certificate) fingerprints will be compared against
+the specified list of \fImatch\fR arguments.  Certificate fingerprints
+are fragile when raw public keys are solicited, the server may at some
+point in time start returning only the public key.
 .IP "\fB\-X\fR"
 Enable \fBtlsproxy\fR(8) mode. This is an unsupported mode,
 for program development only.
@@ -284,7 +309,8 @@ fully\-qualified names or also enable \fBnative\fR host lookups
 (these don't support \fBdane\fR or \fBdane\-only\fR as no DNSSEC
 validation information is available via \fBnative\fR lookups).
 .IP "\fBunix:\fIpathname\fR"
-Connect to the UNIX\-domain socket at \fIpathname\fR. LMTP only.
+Connect to the UNIX\-domain socket at \fIpathname\fR. This feature
+requires "\fB\-S\fR".
 .IP "\fBmatch ...\fR"
 With no match arguments specified, certificate peername matching uses
 the compiled\-in default strategies for each security level.  If you

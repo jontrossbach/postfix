@@ -10,38 +10,55 @@
 /*	into the \fBincoming\fR mail queue, and informs the queue
 /*	manager of its arrival.
 /*
-/*	The \fBcleanup\fR(8) daemon always performs the following transformations:
+/*	The \fBcleanup\fR(8) daemon performs the following transformations:
 /* .IP \(bu
 /*	Insert missing message headers: (\fBResent-\fR) \fBFrom:\fR,
 /*	\fBTo:\fR, \fBMessage-Id:\fR, and \fBDate:\fR.
+/* .br
+/*	This is enabled with the \fBlocal_header_rewrite_clients\fR and
+/*	\fBalways_add_missing_headers\fR parameter settings.
 /* .IP \(bu
 /*	Transform envelope and header addresses to the standard
 /*	\fIuser@fully-qualified-domain\fR form that is expected by other
 /*	Postfix programs.
-/*	This task is delegated to the \fBtrivial-rewrite\fR(8) daemon.
+/*	This task depends on the \fBtrivial-rewrite\fR(8) daemon.
+/* .br
+/*	The header transformation is enabled with the
+/*	\fBlocal_header_rewrite_clients\fR parameter setting.
 /* .IP \(bu
 /*	Eliminate duplicate envelope recipient addresses.
+/* .br
+/*	This is enabled with the \fBduplicate_filter_limit\fR
+/*	parameter setting.
 /* .IP \(bu
 /*	Remove message headers: \fBBcc\fR, \fBContent-Length\fR,
 /*	\fBResent-Bcc\fR, \fBReturn-Path\fR.
-/* .PP
-/*	The following address transformations are optional:
+/* .br
+/*	This is enabled with the message_drop_headers parameter
+/*	setting.
 /* .IP \(bu
 /*	Optionally, rewrite all envelope and header addresses according
 /*	to the mappings specified in the \fBcanonical\fR(5) lookup tables.
+/* .br
+/*	The header transformation is enabled with the
+/*	\fBlocal_header_rewrite_clients\fR parameter setting.
 /* .IP \(bu
 /*	Optionally, masquerade envelope sender addresses and message
 /*	header addresses (i.e. strip host or domain information below
 /*	all domains listed in the \fBmasquerade_domains\fR parameter,
 /*	except for user names listed in \fBmasquerade_exceptions\fR).
 /*	By default, address masquerading does not affect envelope recipients.
+/* .br
+/*	The header transformation is enabled with the
+/*	\fBlocal_header_rewrite_clients\fR parameter setting.
 /* .IP \(bu
 /*	Optionally, expand envelope recipients according to information
-/*	found in the \fBvirtual\fR(5) lookup tables.
+/*	found in the \fBvirtual_alias_maps\fR lookup tables.
 /* .PP
 /*	The \fBcleanup\fR(8) daemon performs sanity checks on the content of
 /*	each message. When it finds a problem, by default it returns a
-/*	diagnostic status to the client, and leaves it up to the client
+/*	diagnostic status to the cleanup service client, and leaves
+/*	it up to the client
 /*	to deal with the problem. Alternatively, the client can request
 /*	the \fBcleanup\fR(8) daemon to bounce the message back to the sender
 /*	in case of trouble.
@@ -53,6 +70,7 @@
 /*	RFC 3463 (Enhanced Status Codes)
 /*	RFC 3464 (Delivery status notifications)
 /*	RFC 5322 (Internet Message Format)
+/*	RFC 8689 (TLS-Required: message header)
 /* DIAGNOSTICS
 /*	Problems and transactions are logged to \fBsyslogd\fR(8)
 /*	or \fBpostlogd\fR(8).
@@ -92,11 +110,27 @@
 /*	Available in Postfix version 2.9 and later:
 /* .IP "\fBenable_long_queue_ids (no)\fR"
 /*	Enable long, non-repeating, queue IDs (queue file names).
+/* HEADER FORMATTING CONTROLS
+/* .ad
+/* .fi
 /* .PP
 /*	Available in Postfix version 3.0 and later:
 /* .IP "\fBmessage_drop_headers (bcc, content-length, resent-bcc, return-path)\fR"
 /*	Names of message headers that the \fBcleanup\fR(8) daemon will remove
 /*	after applying \fBheader_checks\fR(5) and before invoking Milter applications.
+/* .PP
+/*	Available in Postfix version 3.3 and later:
+/* .IP "\fBheader_from_format (standard)\fR"
+/*	The format of the Postfix-generated \fBFrom:\fR header.
+/* .PP
+/*	Available in Postfix version 3.10 and later:
+/* .IP "\fBfull_name_encoding_charset (utf-8)\fR"
+/*	The character set name (also called "charset") that Postfix
+/*	will output when it automatically generates an RFC 2047 encoded
+/*	full name.
+/* .IP "\fBnon_empty_end_of_header_action (fix_quietly)\fR"
+/*	How the \fBcleanup\fR(8) daemon will process a message when the primary
+/*	message header is terminated with a non-empty line.
 /* BUILT-IN CONTENT FILTERING CONTROLS
 /* .ad
 /* .fi
@@ -128,6 +162,14 @@
 /* .IP "\fBmessage_strip_characters (empty)\fR"
 /*	The set of characters that Postfix will remove from message
 /*	content.
+/* .PP
+/*	Available in Postfix version 3.9, 3.8.5, 3.7.10, 3.6.14,
+/*	3.5.24, and later:
+/* .IP "\fBcleanup_replace_stray_cr_lf (yes)\fR"
+/*	Replace each stray <CR> or <LF> character in message
+/*	content with a space character, to prevent outbound SMTP smuggling,
+/*	and to make the evaluation of Postfix-added DKIM or other signatures
+/*	independent from how a remote mail server handles such characters.
 /* BEFORE QUEUE MILTER CONTROLS
 /* .ad
 /* .fi
@@ -143,9 +185,10 @@
 /*	The mail filter protocol version and optional protocol extensions
 /*	for communication with a Milter application; prior to Postfix 2.6
 /*	the default protocol is 2.
-/* .IP "\fBmilter_default_action (tempfail)\fR"
-/*	The default action when a Milter (mail filter) application is
-/*	unavailable or mis-configured.
+/* .IP "\fBmilter_default_action (Postfix >= 3.11: shutdown; Postfix < 3.11: tempfail)\fR"
+/*	The default action when a Milter (mail filter) response is
+/*	unavailable (for example, bad Postfix configuration or Milter
+/*	failure).
 /* .IP "\fBmilter_macro_daemon_name ($myhostname)\fR"
 /*	The {daemon_name} macro value for Milter (mail filter) applications.
 /* .IP "\fBmilter_macro_v ($mail_name $mail_version)\fR"
@@ -234,10 +277,10 @@
 /*	Available in Postfix version 2.1 and later:
 /* .IP "\fBsender_bcc_maps (empty)\fR"
 /*	Optional BCC (blind carbon-copy) address lookup tables, indexed
-/*	by sender address.
+/*	by envelope sender address.
 /* .IP "\fBrecipient_bcc_maps (empty)\fR"
 /*	Optional BCC (blind carbon-copy) address lookup tables, indexed by
-/*	recipient address.
+/*	envelope recipient address.
 /* ADDRESS TRANSFORMATION CONTROLS
 /* .ad
 /* .fi
@@ -275,8 +318,11 @@
 /* .PP
 /*	Available in Postfix version 2.0 and later:
 /* .IP "\fBvirtual_alias_maps ($virtual_maps)\fR"
-/*	Optional lookup tables that alias specific mail addresses or domains
-/*	to other local or remote address.
+/*	Optional lookup tables that are often searched with a full email
+/*	address (including domain) and that apply to all recipients: \fBlocal\fR(8),
+/*	virtual, and remote; this is unlike alias_maps that are only searched
+/*	with an email address localpart (no domain) and that apply
+/*	only to \fBlocal\fR(8) recipients.
 /* .PP
 /*	Available in Postfix version 2.2 and later:
 /* .IP "\fBcanonical_classes (envelope_sender, envelope_recipient, header_sender, header_recipient)\fR"
@@ -288,9 +334,10 @@
 /*	What addresses are subject to sender_canonical_maps address
 /*	mapping.
 /* .IP "\fBremote_header_rewrite_domain (empty)\fR"
-/*	Don't rewrite message headers from remote clients at all when
-/*	this parameter is empty; otherwise, rewrite message headers and
-/*	append the specified domain name to incomplete addresses.
+/*	Rewrite or add message headers in mail from remote clients if
+/*	the remote_header_rewrite_domain parameter value is non-empty,
+/*	updating incomplete addresses with the domain specified in the
+/*	remote_header_rewrite_domain parameter, and adding missing headers.
 /* RESOURCE AND RATE CONTROLS
 /* .ad
 /* .fi
@@ -337,7 +384,7 @@
 /*	Preliminary SMTPUTF8 support is introduced with Postfix 3.0.
 /* .IP "\fBsmtputf8_enable (yes)\fR"
 /*	Enable preliminary SMTPUTF8 support for the protocols described
-/*	in RFC 6531..6533.
+/*	in RFC 6531, RFC 6532, and RFC 6533.
 /* .IP "\fBsmtputf8_autodetect_classes (sendmail, verify)\fR"
 /*	Detect that a message requires SMTPUTF8 support for the specified
 /*	mail origin classes.
@@ -347,6 +394,16 @@
 /*	Enable 'transitional' compatibility between IDNA2003 and IDNA2008,
 /*	when converting UTF-8 domain names to/from the ASCII form that is
 /*	used for DNS lookups.
+/* TLS SUPPORT
+/* .ad
+/* .fi
+/*	Available in Postfix version 3.10 and later:
+/* .IP "\fBtls_required_enable (yes)\fR"
+/*	Enable support for the "TLS-Required: no" message header, defined
+/*	in RFC 8689.
+/* .IP "\fBrequiretls_esmtp_header (yes)\fR"
+/*	Record the ESMTP REQUIRETLS request in a "Require-TLS-ESMTP:
+/*	yes" message header.
 /* MISCELLANEOUS CONTROLS
 /* .ad
 /* .fi
@@ -358,7 +415,7 @@
 /*	request before it is terminated by a built-in watchdog timer.
 /* .IP "\fBdelay_logging_resolution_limit (2)\fR"
 /*	The maximal number of digits after the decimal point when logging
-/*	sub-second delay values.
+/*	delay values.
 /* .IP "\fBdelay_warning_time (0h)\fR"
 /*	The time after which the sender receives a copy of the message
 /*	headers of mail that is still queued.
@@ -405,6 +462,12 @@
 /* .IP "\fBinfo_log_address_format (external)\fR"
 /*	The email address form that will be used in non-debug logging
 /*	(info, warning, etc.).
+/* .PP
+/*	Available in Postfix 3.9 and later:
+/* .IP "\fBforce_mime_input_conversion (no)\fR"
+/*	Convert body content that claims to be 8-bit into quoted-printable,
+/*	before header_checks, body_checks, Milters, and before after-queue
+/*	content filters.
 /* FILES
 /*	/etc/postfix/canonical*, canonical mapping table
 /*	/etc/postfix/virtual*, virtual mapping table
@@ -443,6 +506,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -503,6 +569,7 @@ static void cleanup_service(VSTREAM *src, char *unused_service, char **argv)
      * about the whole operation.
      */
     attr_print(src, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_CLEANUP),
 	       SEND_ATTR_STR(MAIL_ATTR_QUEUEID, state->queue_id),
 	       ATTR_TYPE_END);
     if (attr_scan(src, ATTR_FLAG_STRICT,
@@ -616,6 +683,7 @@ int     main(int argc, char **argv)
     single_server_main(argc, argv, cleanup_service,
 		       CA_MAIL_SERVER_INT_TABLE(cleanup_int_table),
 		       CA_MAIL_SERVER_BOOL_TABLE(cleanup_bool_table),
+		       CA_MAIL_SERVER_NBOOL_TABLE(cleanup_nbool_table),
 		       CA_MAIL_SERVER_STR_TABLE(cleanup_str_table),
 		       CA_MAIL_SERVER_TIME_TABLE(cleanup_time_table),
 		       CA_MAIL_SERVER_PRE_INIT(cleanup_pre_jail),

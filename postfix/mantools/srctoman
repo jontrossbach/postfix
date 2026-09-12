@@ -63,7 +63,9 @@ do
 	/^NAME[ 	]*$/{
 	    N
 	    s/^.*\n'"$B"'[ 	]*//
+	    s/[ 	]*$//
 	    h
+	    s/,.*\( [0-9][^ ]*\)$/\1/
 	    y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/
 	    s/^.*$/.TH & '"$SECT"'\
 .ad\
@@ -90,7 +92,7 @@ do
 	/^HISTORY/s//.SH &\
 .ad\
 .fi/
-	/^[A-Z][A-Z][A-Z][^a-z]*$/s//.SH "&"\
+	/^[A-Z][A-Za-z][A-Za-z].*$/s//.SH "&"\
 .na\
 .nf/
 	p
@@ -102,6 +104,9 @@ do
     /^\\"/d
     /^\./{
 	s/\([^ ]\)-/\1\\-/g
+    }
+    /^'"'"'/{
+	s/^/\\\&/
     }
     /^[^.]/{
 	s/-/\\-/g

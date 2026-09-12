@@ -32,6 +32,9 @@
 /*	int	first_next;
 /*	const char **cache_key;
 /*	const char **cache_val;
+/*
+/*	int	dict_cache_error(cache)
+/*	DICT_CACHE *cache;
 /* AUXILIARY FUNCTIONS
 /*	void	dict_cache_control(cache, name, value, ...)
 /*	DICT_CACHE *cache;
@@ -108,8 +111,9 @@
 /*	Log cache statistics after each cache cleanup run.
 /* .RE
 /* .IP "CA_DICT_CACHE_CTL_INTERVAL(int interval)"
-/*	The interval between cache cleanup runs.  Specify a null
-/*	validator or interval to stop cache cleanup.
+/*	The interval between cache cleanup runs. Specify a null
+/*	validator or interval to stop cache cleanup and log cache
+/*	statistics if a cleanup run was in progress.
 /* .IP "CA_DICT_CACHE_CTL_VALIDATOR(DICT_CACHE_VALIDATOR_FN validator)"
 /*	An application call-back routine that returns non-zero when
 /*	a cache entry should be kept. The call-back function should
@@ -120,6 +124,9 @@
 /* .RE
 /* .PP
 /*	dict_cache_name() returns the name of the specified cache.
+/*
+/*	dict_cache_error() returns the error status for the underlying
+/*	dictionary.
 /*
 /*	Arguments:
 /* .IP "dbname, open_flags, dict_flags"
@@ -139,7 +146,7 @@
 /*	behind" strategy does not interfere with database access,
 /*	allow dict_cache_sequence() to run to completion.
 /* .IP table
-/*	A bare dictonary handle.
+/*	A bare dictionary handle.
 /* DIAGNOSTICS
 /*	When a request is satisfied, the lookup routine returns
 /*	non-null, and the update, delete and sequence routines
@@ -657,10 +664,15 @@ void    dict_cache_close(DICT_CACHE *cp)
 {
 
     /*
+     * Cancel the cache cleanup thread. This also logs (and resets)
+     * statistics for a scan that is in progress.
+     */
+    dict_cache_control(cp, DICT_CACHE_CTL_INTERVAL, 0, DICT_CACHE_CTL_END);
+
+    /*
      * Destroy the DICT_CACHE object.
      */
     myfree(cp->name);
-    dict_cache_control(cp, DICT_CACHE_CTL_INTERVAL, 0, DICT_CACHE_CTL_END);
     dict_close(cp->db);
     if (cp->saved_curr_key)
 	myfree(cp->saved_curr_key);
@@ -675,12 +687,19 @@ const char *dict_cache_name(DICT_CACHE *cp)
 {
 
     /*
-     * This is used for verbose logging or warning messages, so the cost of
-     * call is only made where needed (well sort off - code that does not
+     * This is used for verbose logging or warning messages, so the cost of a
+     * call is only made where needed (well sort of - code that does not
      * execute still presents overhead for the processor pipeline, processor
      * cache, etc).
      */
     return (cp->name);
+}
+
+/* dict_cache_error - get the dictionary error status */
+
+int     dict_cache_error(DICT_CACHE *cp)
+{
+    return (cp->error);
 }
 
  /*

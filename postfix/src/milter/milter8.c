@@ -128,6 +128,7 @@
 #define SMFIC_OPTNEG		'O'	/* Option negotiation */
 #define SMFIC_QUIT		'Q'	/* QUIT */
 #define SMFIC_RCPT		'R'	/* RCPT to */
+ /* Introduced with Sendmail 8.13. */
 #define SMFIC_DATA		'T'	/* DATA */
 #define SMFIC_UNKNOWN		'U'	/* Any unknown command */
  /* Introduced with Sendmail 8.14. */
@@ -146,6 +147,7 @@ static const NAME_CODE smfic_table[] = {
     "SMFIC_OPTNEG", SMFIC_OPTNEG,
     "SMFIC_QUIT", SMFIC_QUIT,
     "SMFIC_RCPT", SMFIC_RCPT,
+    /* Introduced with Sendmail 8.13. */
     "SMFIC_DATA", SMFIC_DATA,
     "SMFIC_UNKNOWN", SMFIC_UNKNOWN,
     /* Introduced with Sendmail 8.14. */
@@ -214,11 +216,12 @@ static const NAME_CODE smfir_table[] = {
 #define SMFIP_NOBODY		(1L<<4)	/* filter does not want body */
 #define SMFIP_NOHDRS		(1L<<5)	/* filter does not want headers */
 #define SMFIP_NOEOH		(1L<<6)	/* filter does not want EOH */
-#define SMFIP_NR_HDR		(1L<<7)	/* filter won't reply for header */
+ /* Introduced with Sendmail 8.13. */
 #define SMFIP_NOHREPL		SMFIP_NR_HDR
+ /* Introduced with Sendmail 8.14. */
+#define SMFIP_NR_HDR		(1L<<7)	/* filter won't reply for header */
 #define SMFIP_NOUNKNOWN 	(1L<<8)	/* filter does not want unknown cmd */
 #define SMFIP_NODATA		(1L<<9)	/* filter does not want DATA */
- /* Introduced with Sendmail 8.14. */
 #define SMFIP_SKIP		(1L<<10)/* MTA supports SMFIR_SKIP */
 #define SMFIP_RCPT_REJ		(1L<<11)/* filter wants rejected RCPTs */
 #define SMFIP_NR_CONN		(1L<<12)/* filter won't reply for connect */
@@ -249,10 +252,10 @@ static const NAME_MASK smfip_table[] = {
     "SMFIP_NOBODY", SMFIP_NOBODY,
     "SMFIP_NOHDRS", SMFIP_NOHDRS,
     "SMFIP_NOEOH", SMFIP_NOEOH,
+    /* Introduced with Sendmail 8.14. */
     "SMFIP_NR_HDR", SMFIP_NR_HDR,
     "SMFIP_NOUNKNOWN", SMFIP_NOUNKNOWN,
     "SMFIP_NODATA", SMFIP_NODATA,
-    /* Introduced with Sendmail 8.14. */
     "SMFIP_SKIP", SMFIP_SKIP,
     "SMFIP_RCPT_REJ", SMFIP_RCPT_REJ,
     "SMFIP_NR_CONN", SMFIP_NR_CONN,
@@ -276,6 +279,7 @@ static const NAME_MASK smfip_table[] = {
 #define SMFIF_ADDRCPT		(1L<<2)	/* filter may add recipients */
 #define SMFIF_DELRCPT		(1L<<3)	/* filter may delete recipients */
 #define SMFIF_CHGHDRS		(1L<<4)	/* filter may change/delete headers */
+ /* Introduced with Sendmail 8.13. */
 #define SMFIF_QUARANTINE 	(1L<<5)	/* filter may quarantine envelope */
  /* Introduced with Sendmail 8.14. */
 #define SMFIF_CHGFROM		(1L<<6)	/* filter may replace sender */
@@ -288,6 +292,7 @@ static const NAME_MASK smfif_table[] = {
     "SMFIF_ADDRCPT", SMFIF_ADDRCPT,
     "SMFIF_DELRCPT", SMFIF_DELRCPT,
     "SMFIF_CHGHDRS", SMFIF_CHGHDRS,
+    /* Introduced with Sendmail 8.13. */
     "SMFIF_QUARANTINE", SMFIF_QUARANTINE,
     /* Introduced with Sendmail 8.14. */
     "SMFIF_CHGFROM", SMFIF_CHGFROM,
@@ -486,6 +491,7 @@ static const NAME_CODE milter8_versions[] = {
 
 #define STR(x) vstring_str(x)
 #define LEN(x) VSTRING_LEN(x)
+#define END(x) vstring_end(x)
 
 /* milter8_def_reply - set persistent response */
 
@@ -518,8 +524,10 @@ static int milter8_conf_error(MILTER8 *milter)
     }
     if (strcasecmp(milter->def_action, "accept") == 0) {
 	reply = 0;
+    } else if (strcasecmp(milter->def_action, "shutdown") == 0) {
+	reply = "421 4.3.5 Server configuration problem - try again later";
     } else if (strcasecmp(milter->def_action, "quarantine") == 0) {
-	reply = "H";
+	reply = "Hdefault_action";
     } else {
 	reply = "451 4.3.5 Server configuration problem - try again later";
     }
@@ -552,8 +560,10 @@ static int milter8_comm_error(MILTER8 *milter)
 	reply = "550 5.5.0 Service unavailable";
     } else if (strcasecmp(milter->def_action, "tempfail") == 0) {
 	reply = "451 4.7.1 Service unavailable - try again later";
+    } else if (strcasecmp(milter->def_action, "shutdown") == 0) {
+	reply = "421 4.7.1 Service unavailable - try again later";
     } else if (strcasecmp(milter->def_action, "quarantine") == 0) {
-	reply = "H";
+	reply = "Hdefault_action";
     } else {
 	msg_warn("milter %s: unrecognized default action: %s",
 		 milter->m.name, milter->def_action);
@@ -674,6 +684,8 @@ static int vmilter8_read_data(MILTER8 *milter, ssize_t *data_len, va_list ap)
 		return (milter8_comm_error(milter));
 	    }
 	    *data_len = 0;
+	    /* Qualys+Mythos: terminate string data before stale data. */
+	    VSTRING_TERMINATE(buf);
 	    break;
 
 	    /*
@@ -943,6 +955,64 @@ static int milter8_write_cmd(MILTER8 *milter, int command,...)
     return (err);
 }
 
+/* milter8_valid_smtp_reply - validate SMTP reply (after 202607 OpenAI) */
+
+static int milter8_valid_smtp_reply(VSTRING *buf)
+{
+    const unsigned char *cp = (unsigned char *) STR(buf);
+    const unsigned char *buf_end = cp + LEN(buf);
+
+    /* Exclude one terminal Milter protocol null from the reply text. */
+    if (buf_end > cp && buf_end[-1] == 0)
+	buf_end -= 1;
+
+    if (memchr(cp, 0, buf_end - cp) != 0)
+	return (0);
+
+    while (cp < buf_end) {
+	const unsigned char *line_end;
+	ssize_t line_len;
+	int     final;
+
+	/* Part of a breaking change, not allowed in stable release. */
+#ifdef SNAPSHOT
+	unsigned char code[3];
+	int     first = 1;
+
+#endif
+
+	/* A final line must not end in a line terminator. */
+	line_len = strcspn((const char *) cp, "\r\n");
+	line_end = cp + line_len;
+	final = (line_end == buf_end);
+
+	/* Each line must match /^ddd(-| )d?/. */
+	if (line_len < 4 || (cp[0] != '4' && cp[0] != '5') || !ISDIGIT(cp[1])
+	    || !ISDIGIT(cp[2]) || (cp[3] != (final ? ' ' : '-'))
+	    || (line_len > 4 && ISDIGIT(cp[4]) && cp[4] != cp[0]))
+	    return (0);
+
+	/* Part of a breaking change, not allowed in stable release. */
+#ifdef SNAPSHOT
+	if (first) {
+	    code[0] = cp[0];
+	    code[1] = cp[1];
+	    code[2] = cp[2];
+	    first = 0;
+	} else if (cp[0] != code[0] || cp[1] != code[1] || cp[2] != code[2]) {
+	    return (0);
+	}
+#endif
+	/* A non-final line must end in a line terminator. */
+	if (final)
+	    return (1);
+	if (line_end > buf_end - 2 || *line_end != '\r' || line_end[1] != '\n')
+	    return (0);
+	cp = line_end + 2;
+    }
+    return (0);
+}
+
 /* milter8_event - report event and receive reply */
 
 static const char *milter8_event(MILTER8 *milter, int event,
@@ -1147,10 +1217,12 @@ static const char *milter8_event(MILTER8 *milter, int event,
 	    if (edit_resp == 0 && LEN(body_line_buf) > 0)
 		edit_resp = parent->repl_body(parent->chg_context,
 					      MILTER_BODY_LINE,
+					      REC_TYPE_NORM,
 					      body_line_buf);
 	    if (edit_resp == 0)
 		edit_resp = parent->repl_body(parent->chg_context,
 					      MILTER_BODY_END,
+					       /* unused */ 0,
 					      (VSTRING *) 0);
 	    body_edit_lockout = 1;
 	    vstring_free(body_line_buf);
@@ -1276,13 +1348,7 @@ static const char *milter8_event(MILTER8 *milter, int event,
 				  MILTER8_DATA_BUFFER, milter->buf,
 				  MILTER8_DATA_END) != 0)
 		MILTER8_EVENT_BREAK(milter->def_reply);
-	    /* XXX Enforce this for each line of a multi-line reply. */
-	    if ((STR(milter->buf)[0] != '4' && STR(milter->buf)[0] != '5')
-		|| !ISDIGIT(STR(milter->buf)[1])
-		|| !ISDIGIT(STR(milter->buf)[2])
-		|| (STR(milter->buf)[3] != ' ' && STR(milter->buf)[3] != '-')
-		|| (ISDIGIT(STR(milter->buf)[4])
-		    && (STR(milter->buf)[4] != STR(milter->buf)[0]))) {
+	    if (!milter8_valid_smtp_reply(milter->buf)) {
 		msg_warn("milter %s: malformed reply: %s",
 			 milter->m.name, STR(milter->buf));
 		milter8_conf_error(milter);
@@ -1298,10 +1364,11 @@ static const char *milter8_event(MILTER8 *milter, int event,
 		}
 	    }
 	    if (var_soft_bounce) {
-		for (cp = STR(milter->buf); /* void */ ; cp = next) {
+		for (cp = STR(milter->buf); cp < END(milter->buf) ; cp = next) {
 		    if (cp[0] == '5') {
 			cp[0] = '4';
-			if (cp[4] == '5')
+			/* Qualys+Mythos: add missing guard. */
+			if (cp + 4 < END(milter->buf) && cp[4] == '5')
 			    cp[4] = '4';
 		    }
 		    if ((next = strstr(cp, "\r\n")) == 0)
@@ -1325,14 +1392,24 @@ static const char *milter8_event(MILTER8 *milter, int event,
 	     * accept, discard). We should not transition, either, otherwise
 	     * we get out of sync.
 	     */
-	case SMFIR_QUARANTINE:
-	    /* XXX What to do with the "reason" text? */
-	    if (milter8_read_data(milter, &data_size,
-				  MILTER8_DATA_BUFFER, milter->buf,
-				  MILTER8_DATA_END) != 0)
-		MILTER8_EVENT_BREAK(milter->def_reply);
-	    milter8_def_reply(milter, "H");
-	    continue;
+	case SMFIR_QUARANTINE:{
+		VSTRING *reply;
+		ssize_t saved_size = data_size;
+
+		if (milter8_read_data(milter, &data_size,
+				      MILTER8_DATA_BUFFER, milter->buf,
+				      MILTER8_DATA_END) != 0)
+		    MILTER8_EVENT_BREAK(milter->def_reply);
+		/* XXX This should be reported with a call-back. */
+		reply = vstring_alloc(100);
+		if (saved_size > 100)
+		    saved_size = 100;
+		vstring_sprintf(reply, "H%.*s", (int) saved_size,
+				STR(milter->buf));
+		milter8_def_reply(milter, STR(reply));
+		vstring_free(reply);
+		continue;
+	    }
 
 	    /*
 	     * Decision: skip further events of this type.
@@ -1546,6 +1623,7 @@ static const char *milter8_event(MILTER8 *milter, int event,
 			body_line_buf = vstring_alloc(var_line_limit);
 			edit_resp = parent->repl_body(parent->chg_context,
 						      MILTER_BODY_START,
+						       /* unused */ 0,
 						      (VSTRING *) 0);
 		    }
 		    /* Extract lines from the on-the-wire CRLF format. */
@@ -1559,9 +1637,18 @@ static const char *milter8_event(MILTER8 *milter, int event,
 						 LEN(body_line_buf) - 1);
 			    edit_resp = parent->repl_body(parent->chg_context,
 							  MILTER_BODY_LINE,
+							  REC_TYPE_NORM,
 							  body_line_buf);
 			    VSTRING_RESET(body_line_buf);
 			} else {
+			    /* Preserves \r if not followed by \n. */
+			    if (LEN(body_line_buf) == var_line_limit) {
+				edit_resp = parent->repl_body(parent->chg_context,
+							   MILTER_BODY_LINE,
+							      REC_TYPE_CONT,
+							      body_line_buf);
+				VSTRING_RESET(body_line_buf);
+			    }
 			    VSTRING_ADDCH(body_line_buf, ch);
 			}
 		    }
@@ -1592,8 +1679,11 @@ static const char *milter8_event(MILTER8 *milter, int event,
     /*
      * Clean up after aborted message body replacement.
      */
-    if (body_line_buf)
+    if (body_line_buf) {
+	 if (edit_resp == 0 && (retval == 0 || strchr("DS45", retval[0]) == 0))
+	    retval = "421 4.7.0 Service unavailable";
 	vstring_free(body_line_buf);
+    }
 
     /*
      * XXX Some cleanup clients ask the cleanup server to bounce mail for
@@ -2672,7 +2762,7 @@ static int milter8_send(MILTER *m, VSTREAM *stream)
 	|| (milter->m.macros != 0
 	    && attr_print(stream, ATTR_FLAG_NONE,
 			  SEND_ATTR_FUNC(milter_macros_print,
-					 (void *) milter->m.macros),
+					 (const void *) milter->m.macros),
 			  ATTR_TYPE_END) != 0)
 	|| (milter->m.macros == 0
 	    && attr_print(stream, ATTR_FLAG_NONE,

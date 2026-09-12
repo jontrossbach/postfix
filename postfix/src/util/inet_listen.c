@@ -49,6 +49,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System libraries. */
@@ -92,7 +97,7 @@ int     inet_listen(const char *addr, int backlog, int block_mode)
     const char *parse_err;
     MAI_HOSTADDR_STR hostaddr;
     MAI_SERVPORT_STR portnum;
-    INET_PROTO_INFO *proto_info;
+    const INET_PROTO_INFO *proto_info;
 
     /*
      * Translate address information to internal form.

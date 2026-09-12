@@ -32,6 +32,7 @@ typedef struct {
 #define NAME_MASK_NUMBER	(1<<5)
 #define NAME_MASK_WARN		(1<<6)
 #define NAME_MASK_IGNORE	(1<<7)
+#define NAME_MASK_NULL		(1<<8)
 
 #define NAME_MASK_REQUIRED \
     (NAME_MASK_FATAL | NAME_MASK_RETURN | NAME_MASK_WARN | NAME_MASK_IGNORE)
@@ -49,9 +50,10 @@ typedef struct {
 #define name_mask(tag, table, str) \
 	name_mask_opt((tag), (table), (str), NAME_MASK_DEFAULT)
 #define str_name_mask(tag, table, mask) \
-	str_name_mask_opt(((VSTRING *) 0), (tag), (table), (mask), NAME_MASK_DEFAULT)
+	str_name_mask_delim_opt(((VSTRING *) 0), (tag), (table), (mask), ", ", NAME_MASK_DEFAULT)
 
 extern int name_mask_delim_opt(const char *, const NAME_MASK *, const char *, const char *, int);
+extern const char *str_name_mask_delim_opt(VSTRING *, const char *, const NAME_MASK *, int, const char *, int);
 extern const char *str_name_mask_opt(VSTRING *, const char *, const NAME_MASK *, int, int);
 
  /*

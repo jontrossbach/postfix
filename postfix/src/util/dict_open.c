@@ -39,13 +39,26 @@
 /*	void	dict_close(dict)
 /*	DICT	*dict;
 /*
+/*	typedef struct {
+/* .in +4
+/*	    char   *type;
+/*	    DICT_OPEN_FN dict_fn;
+/*	    MKMAP_OPEN_FN mkmap_fn;	/* See <mkmap.h> */
+/* .in -4
+/*	} DICT_OPEN_INFO;
+/*
 /*	typedef DICT *(*DICT_OPEN_FN) (const char *, int, int);
 /*
-/*	dict_open_register(type, open)
-/*	const char *type;
-/*	DICT_OPEN_FN open;
+/*	void	dict_open_register(open_info)
+/*	DICT_OPEN_INFO *open_info;
 /*
-/*	typedef DICT_OPEN_FN (*DICT_OPEN_EXTEND_FN)(const char *type);
+/*	void	dict_open_unregister(dict_type)
+/*	const char *dict_type;
+/*
+/*	const DICT_OPEN_INFO *dict_open_lookup(dict_type)
+/*	const char *dict_type;
+/*
+/*	typedef DICT_OPEN_INFO (*DICT_OPEN_EXTEND_FN)(char *);
 /*
 /*	DICT_OPEN_EXTEND_FN dict_open_extend(call_back)
 /*	DICT_OPEN_EXTEND_FN call_back;
@@ -72,7 +85,17 @@
 /*	const char *type;
 /* DESCRIPTION
 /*	This module implements a low-level interface to multiple
-/*	physical dictionary types.
+/*	dictionary types.
+/*
+/*	In addition to providing a mapping from type names to
+/*	implementations, this module deduplicates requests to open a
+/*	dictionary with the same fingerprint (type, name, and initial
+/*	flags), and manages the dictionary life cycle using reference
+/*	counts maintained with dict_(un)register().
+/*
+/*	The fingerprint, generated with dict_make_registered_name()
+/*	and available as DICT.reg_name, may be used in dict_handle()
+/*	calls.
 /*
 /*	dict_open() takes a type:name pair that specifies a dictionary type
 /*	and dictionary name, opens the dictionary, and returns a dictionary
@@ -154,8 +177,6 @@
 /*	Enable preliminary code for bulk-mode database updates.
 /*	The caller must create an exception handler with dict_jmp_alloc()
 /*	and must trap exceptions from the database client with dict_setjmp().
-/* .IP DICT_FLAG_DEBUG
-/*	Enable additional logging.
 /* .IP DICT_FLAG_UTF8_REQUEST
 /*	With util_utf8_enable != 0, require that lookup/update/delete
 /*	keys and values are valid UTF-8. Skip a lookup/update/delete
@@ -238,6 +259,15 @@
 /*	associated data structures.
 /*
 /*	dict_open_register() adds support for a new dictionary type.
+/*	NOTE: this function does not copy its argument. It is an error
+/*	to add an existing type.
+/*
+/*	dict_open_unregister() removes support for a dictionary type.
+/*	NOTE: it is an error to delete a non-existent type.
+/*
+/*	dict_open_lookup() returns a pointer to the DICT_OPEN_INFO
+/*	for the specified dictionary type, or a null pointer if the
+/*	requested information is not found.
 /*
 /*	dict_open_extend() registers a call-back function that looks
 /*	up the dictionary open() function for a type that is not
@@ -266,10 +296,15 @@
 /*
 /*	dict_type_override() changes the symbolic dictionary type.
 /*	This is used by dictionaries whose internals are based on
-/*	some other dictionary type.
+/*	some other dictionary type. dict_type_override() requires that
+/*	the dictionary is not already registered with dict_register(),
+/*	i.e., it must be the result from dict_xxx_open(), not from
+/*	dict_open(). If needed in the future, this limitation may
+/*	be lifted.
 /* DIAGNOSTICS
 /*	Fatal error: open error, unsupported dictionary type, attempt to
-/*	update non-writable dictionary.
+/*	update non-writable dictionary, attempt to unregister a type
+/*	that is not registered.
 /*
 /*	The lookup routine returns non-null when the request is
 /*	satisfied. The update, delete and sequence routines return
@@ -322,6 +357,7 @@
 #include <msg.h>
 #include <dict.h>
 #include <dict_cdb.h>
+#include <dict_debug.h>
 #include <dict_env.h>
 #include <dict_unix.h>
 #include <dict_tcp.h>
@@ -348,62 +384,59 @@
 #include <split_at.h>
 #include <htable.h>
 #include <myflock.h>
+#include <mkmap.h>
 
  /*
   * lookup table for available map types.
   */
-typedef struct {
-    char   *type;
-    DICT_OPEN_FN open;
-} DICT_OPEN_INFO;
-
 static const DICT_OPEN_INFO dict_open_info[] = {
-    DICT_TYPE_ENVIRON, dict_env_open,
-    DICT_TYPE_HT, dict_ht_open,
-    DICT_TYPE_UNIX, dict_unix_open,
-    DICT_TYPE_TCP, dict_tcp_open,
+    DICT_TYPE_ENVIRON, dict_env_open, 0,
+    DICT_TYPE_HT, dict_ht_open, 0,
+    DICT_TYPE_UNIX, dict_unix_open, 0,
+    DICT_TYPE_TCP, dict_tcp_open, 0,
 #ifdef HAS_DBM
-    DICT_TYPE_DBM, dict_dbm_open,
-#endif
-#ifdef HAS_DB
-    DICT_TYPE_HASH, dict_hash_open,
-    DICT_TYPE_BTREE, dict_btree_open,
+    DICT_TYPE_DBM, dict_dbm_open, mkmap_dbm_open,
 #endif
 #ifdef HAS_NIS
-    DICT_TYPE_NIS, dict_nis_open,
+    DICT_TYPE_NIS, dict_nis_open, 0,
 #endif
 #ifdef HAS_NISPLUS
-    DICT_TYPE_NISPLUS, dict_nisplus_open,
+    DICT_TYPE_NISPLUS, dict_nisplus_open, 0,
 #endif
 #ifdef HAS_NETINFO
-    DICT_TYPE_NETINFO, dict_ni_open,
+    DICT_TYPE_NETINFO, dict_ni_open, 0,
 #endif
 #ifdef HAS_POSIX_REGEXP
-    DICT_TYPE_REGEXP, dict_regexp_open,
+    DICT_TYPE_REGEXP, dict_regexp_open, 0,
 #endif
-    DICT_TYPE_STATIC, dict_static_open,
-    DICT_TYPE_CIDR, dict_cidr_open,
-    DICT_TYPE_THASH, dict_thash_open,
-    DICT_TYPE_SOCKMAP, dict_sockmap_open,
-    DICT_TYPE_FAIL, dict_fail_open,
-    DICT_TYPE_PIPE, dict_pipe_open,
-    DICT_TYPE_RANDOM, dict_random_open,
-    DICT_TYPE_UNION, dict_union_open,
-    DICT_TYPE_INLINE, dict_inline_open,
+    DICT_TYPE_STATIC, dict_static_open, 0,
+    DICT_TYPE_CIDR, dict_cidr_open, 0,
+    DICT_TYPE_THASH, dict_thash_open, 0,
+    DICT_TYPE_SOCKMAP, dict_sockmap_open, 0,
+    DICT_TYPE_FAIL, dict_fail_open, mkmap_fail_open,
+    DICT_TYPE_PIPE, dict_pipe_open, 0,
+    DICT_TYPE_RANDOM, dict_random_open, 0,
+    DICT_TYPE_UNION, dict_union_open, 0,
+    DICT_TYPE_INLINE, dict_inline_open, 0,
 #ifndef USE_DYNAMIC_MAPS
+#ifdef HAS_DB
+    DICT_TYPE_HASH, dict_hash_open, mkmap_hash_open,
+    DICT_TYPE_BTREE, dict_btree_open, mkmap_btree_open,
+#endif
 #ifdef HAS_PCRE
-    DICT_TYPE_PCRE, dict_pcre_open,
+    DICT_TYPE_PCRE, dict_pcre_open, 0,
 #endif
 #ifdef HAS_CDB
-    DICT_TYPE_CDB, dict_cdb_open,
+    DICT_TYPE_CDB, dict_cdb_open, mkmap_cdb_open,
 #endif
 #ifdef HAS_SDBM
-    DICT_TYPE_SDBM, dict_sdbm_open,
+    DICT_TYPE_SDBM, dict_sdbm_open, mkmap_sdbm_open,
 #endif
 #ifdef HAS_LMDB
-    DICT_TYPE_LMDB, dict_lmdb_open,
+    DICT_TYPE_LMDB, dict_lmdb_open, mkmap_lmdb_open,
 #endif
 #endif					/* !USE_DYNAMIC_MAPS */
+    DICT_TYPE_DEBUG, dict_debug_open, 0,
     0,
 };
 
@@ -416,10 +449,18 @@ static DICT_OPEN_EXTEND_FN dict_open_extend_hook;
 static DICT_MAPNAMES_EXTEND_FN dict_mapnames_extend_hook;
 
  /*
-  * Workaround.
+  * Workaround: define global variables here to control database cache sizes.
+  * When a database driver is dynamically loaded, global control variables
+  * cannot simply be owned by the loadable objects because that would result
+  * in build-time linker errors.
   */
 DEFINE_DICT_LMDB_MAP_SIZE;
 DEFINE_DICT_DB_CACHE_SIZE;
+
+ /*
+  * Replace obscure code with a more readable expression.
+  */
+#define NEED_DICT_OPEN_INIT()	(dict_open_hash == 0)
 
 /* dict_open_init - one-off initialization */
 
@@ -428,7 +469,7 @@ static void dict_open_init(void)
     const char *myname = "dict_open_init";
     const DICT_OPEN_INFO *dp;
 
-    if (dict_open_hash != 0)
+    if (!NEED_DICT_OPEN_INIT())
 	msg_panic("%s: multiple initialization", myname);
     dict_open_hash = htable_create(10);
 
@@ -444,15 +485,17 @@ DICT   *dict_open(const char *dict_spec, int open_flags, int dict_flags)
     char   *dict_name;
     DICT   *dict;
 
-    if ((dict_name = split_at(saved_dict_spec, ':')) == 0)
-	msg_fatal("open dictionary: expecting \"type:name\" form instead of \"%s\"",
-		  dict_spec);
-
-    dict = dict_open3(saved_dict_spec, dict_name, open_flags, dict_flags);
+    if ((dict_name = split_at(saved_dict_spec, ':')) == 0
+	|| *saved_dict_spec == 0 || *dict_name == 0) {
+	dict = dict_surrogate(dict_spec, "", open_flags, dict_flags,
+	  "open dictionary: expecting \"type:name\" form instead of \"%s\"",
+			      dict_spec);
+    } else {
+	dict = dict_open3(saved_dict_spec, dict_name, open_flags, dict_flags);
+    }
     myfree(saved_dict_spec);
     return (dict);
 }
-
 
 /* dict_open3 - open dictionary */
 
@@ -460,28 +503,38 @@ DICT   *dict_open3(const char *dict_type, const char *dict_name,
 		           int open_flags, int dict_flags)
 {
     const char *myname = "dict_open";
-    DICT_OPEN_INFO *dp;
-    DICT_OPEN_FN open_fn;
+    const DICT_OPEN_INFO *dp;
+    VSTRING *reg_name = vstring_alloc(100);
     DICT   *dict;
+
+    /* Workaround for dict_proxy_open() with DICT_FLAG_NO_FILE. */
+#define DICT_OPEN3_RETURN(d) do { \
+	DICT *_d = (d); \
+	dict_register(_d->reg_name? _d->reg_name : vstring_str(reg_name), _d); \
+	vstring_free(reg_name); \
+	return (_d); \
+    } while (0)
+
+    /*
+     * If the dictionary is already open, simply increase the reference count
+     * to update an existing life cycle.
+     */
+    dict_make_registered_name4(reg_name, dict_type, dict_name,
+			       open_flags, dict_flags);
+    if ((dict = dict_handle(vstring_str(reg_name))) != 0)
+	DICT_OPEN3_RETURN(dict);
 
     if (*dict_type == 0 || *dict_name == 0)
 	msg_fatal("open dictionary: expecting \"type:name\" form instead of \"%s:%s\"",
 		  dict_type, dict_name);
-    if (dict_open_hash == 0)
+    if (NEED_DICT_OPEN_INIT())
 	dict_open_init();
-    if ((dp = (DICT_OPEN_INFO *) htable_find(dict_open_hash, dict_type)) == 0) {
-	if (dict_open_extend_hook != 0
-	    && (open_fn = dict_open_extend_hook(dict_type)) != 0) {
-	    dict_open_register(dict_type, open_fn);
-	    dp = (DICT_OPEN_INFO *) htable_find(dict_open_hash, dict_type);
-	}
-	if (dp == 0)
-	    return (dict_surrogate(dict_type, dict_name, open_flags, dict_flags,
-			     "unsupported dictionary type: %s", dict_type));
-    }
-    if ((dict = dp->open(dict_name, open_flags, dict_flags)) == 0)
-	return (dict_surrogate(dict_type, dict_name, open_flags, dict_flags,
-			    "cannot open %s:%s: %m", dict_type, dict_name));
+    if ((dp = dict_open_lookup(dict_type)) == 0)
+	DICT_OPEN3_RETURN(dict_surrogate(dict_type, dict_name, open_flags,
+		 dict_flags, "unsupported dictionary type: %s", dict_type));
+    if ((dict = dp->dict_fn(dict_name, open_flags, dict_flags)) == 0)
+	DICT_OPEN3_RETURN(dict_surrogate(dict_type, dict_name, open_flags,
+		dict_flags, "cannot open %s:%s: %m", dict_type, dict_name));
     if (msg_verbose)
 	msg_info("%s: %s:%s", myname, dict_type, dict_name);
     /* XXX The choice between wait-for-lock or no-wait is hard-coded. */
@@ -503,25 +556,54 @@ DICT   *dict_open3(const char *dict_type, const char *dict_name,
     if ((dict->flags & DICT_FLAG_UTF8_ACTIVE) == 0
 	&& DICT_NEED_UTF8_ACTIVATION(util_utf8_enable, dict_flags))
 	dict = dict_utf8_activate(dict);
-    return (dict);
+    /* Register the result. */
+    DICT_OPEN3_RETURN(dict);
 }
 
 /* dict_open_register - register dictionary type */
 
-void    dict_open_register(const char *type, DICT_OPEN_FN open)
+void    dict_open_register(const DICT_OPEN_INFO *dp)
 {
     const char *myname = "dict_open_register";
-    DICT_OPEN_INFO *dp;
-    HTABLE_INFO *ht;
 
-    if (dict_open_hash == 0)
+    if (msg_verbose > 1)
+	msg_info("%s: %s", myname, dp->type);
+    if (NEED_DICT_OPEN_INIT())
 	dict_open_init();
-    if (htable_find(dict_open_hash, type))
-	msg_panic("%s: dictionary type exists: %s", myname, type);
-    dp = (DICT_OPEN_INFO *) mymalloc(sizeof(*dp));
-    dp->open = open;
-    ht = htable_enter(dict_open_hash, type, (void *) dp);
-    dp->type = ht->key;
+    if (htable_find(dict_open_hash, dp->type))
+	msg_panic("%s: dictionary type exists: %s", myname, dp->type);
+    (void) htable_enter(dict_open_hash, dp->type, (void *) dp);
+}
+
+/* dict_open_unregister - unregister dictionary type */
+
+void    dict_open_unregister(const char *dict_type)
+{
+    const char *myname = "dict_open_unregister";
+
+    if (msg_verbose > 1)
+	msg_info("%s: %s", myname, dict_type);
+    if (NEED_DICT_OPEN_INIT())
+	dict_open_init();
+    htable_delete(dict_open_hash, dict_type, (void (*) (void *)) 0);
+}
+
+/* dict_open_lookup - look up DICT_OPEN_INFO for dictionary type */
+
+const DICT_OPEN_INFO *dict_open_lookup(const char *dict_type)
+{
+    const char myname[] = "dict_open_lookup";
+    const DICT_OPEN_INFO *dp;
+
+    if (msg_verbose > 1)
+	msg_info("%s: %s", myname, dict_type);
+    if (NEED_DICT_OPEN_INIT())
+	dict_open_init();
+    if ((dp = (DICT_OPEN_INFO *) htable_find(dict_open_hash, dict_type)) == 0
+	&& dict_open_extend_hook != 0
+	&& (dp = dict_open_extend_hook(dict_type)) != 0)
+	dict_open_register(dp);
+    return (dp);
 }
 
 /* dict_open_extend - register alternate dictionary search routine */
@@ -535,13 +617,6 @@ DICT_OPEN_EXTEND_FN dict_open_extend(DICT_OPEN_EXTEND_FN new_cb)
     return (old_cb);
 }
 
-/* dict_sort_alpha_cpp - qsort() callback */
-
-static int dict_sort_alpha_cpp(const void *a, const void *b)
-{
-    return (strcmp(((char **) a)[0], ((char **) b)[0]));
-}
-
 /* dict_mapnames - return an ARGV of available map_names */
 
 ARGV   *dict_mapnames()
@@ -551,7 +626,7 @@ ARGV   *dict_mapnames()
     DICT_OPEN_INFO *dp;
     ARGV   *mapnames;
 
-    if (dict_open_hash == 0)
+    if (NEED_DICT_OPEN_INIT())
 	dict_open_init();
     mapnames = argv_alloc(dict_open_hash->used + 1);
     for (ht_info = ht = htable_list(dict_open_hash); *ht; ht++) {
@@ -560,8 +635,9 @@ ARGV   *dict_mapnames()
     }
     if (dict_mapnames_extend_hook != 0)
 	(void) dict_mapnames_extend_hook(mapnames);
-    qsort((void *) mapnames->argv, mapnames->argc, sizeof(mapnames->argv[0]),
-	  dict_sort_alpha_cpp);
+    argv_qsort(mapnames, (ARGV_COMPAR_FN) 0);
+    /* In case some drivers have been loaded dynamically. */
+    argv_uniq(mapnames, (ARGV_COMPAR_FN) 0);
     myfree((void *) ht_info);
     argv_terminate(mapnames);
     return mapnames;
@@ -582,18 +658,66 @@ DICT_MAPNAMES_EXTEND_FN dict_mapnames_extend(DICT_MAPNAMES_EXTEND_FN new_cb)
 
 void    dict_type_override(DICT *dict, const char *type)
 {
+
+    /*
+     * To lift this limitation, compute a new reg_name, and implement a move
+     * (copy+delete) operation from the old reg_name to the new one. Also
+     * handle the case that the new destination name is already in use. The
+     * above should be encapsulated in code adjacent to dict_register().
+     */
+    if (dict->reg_name)
+	msg_panic("%s: %s:%s is already registered",
+		  __func__, dict->type, dict->name);
     myfree(dict->type);
     dict->type = mystrdup(type);
 }
 
 #ifdef TEST
 
+#ifdef USE_DYNAMIC_MAPS
+#include <dynamicmaps.h>
+
+ /*
+  * Get the meta_directory and shlib_directory settings from a test main.cf
+  * file, without using the mail_conf(3) or mail_params(3) infrastructure.
+  */
+#define TEST_CONF_PATH	"../../testing/main.cf"
+#define TEST_DICT	"test_dict"
+#define META_DIR_KEY	"meta_directory"
+#define SHLIB_DIR_KEY	"shlib_directory"
+
+static void init_dynamic_maps(void)
+{
+    const char *meta_dir;
+    const char *shlib_dir;
+    char   *path;
+
+    if (dict_load_file_xt(TEST_DICT, TEST_CONF_PATH) == 0)
+	msg_fatal("open %s: %m", TEST_CONF_PATH);
+    if ((meta_dir = dict_lookup(TEST_DICT, META_DIR_KEY)) == 0
+	|| (shlib_dir = dict_lookup(TEST_DICT, SHLIB_DIR_KEY)) == 0)
+	msg_fatal("unusable file: %s", TEST_CONF_PATH);
+    path = concatenate(meta_dir, "/", "dynamicmaps.cf",
+#ifdef SHLIB_VERSION
+		       ".", SHLIB_VERSION,
+#endif
+		       (char *) 0);
+    dymap_init(path, shlib_dir);
+    myfree(path);
+    dict_unregister(TEST_DICT);
+}
+
+#endif
+
  /*
   * Proof-of-concept test program.
   */
 int     main(int argc, char **argv)
 {
-    dict_test(argc, argv);
+#ifdef USE_DYNAMIC_MAPS
+    init_dynamic_maps();
+#endif
+    dict_cli(argc, argv);
     return (0);
 }
 

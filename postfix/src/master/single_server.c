@@ -577,7 +577,10 @@ NORETURN single_server_main(int argc, char **argv, SINGLE_SERVER_FN service,...)
 	    break;
 	}
     }
-    set_mail_conf_str(VAR_SERVNAME, service_name);
+    /* Read-only parameters must not be changed with '-o name=value'. */
+    set_mail_conf_str(VAR_PROCNAME, var_procname);
+    var_servname = mystrdup(service_name);
+    set_mail_conf_str(VAR_SERVNAME, var_servname);
 
     /*
      * Initialize generic parameters.
@@ -587,7 +590,7 @@ NORETURN single_server_main(int argc, char **argv, SINGLE_SERVER_FN service,...)
 
     /*
      * Register higher-level dictionaries and initialize the support for
-     * dynamically-loaded dictionarles.
+     * dynamically-loaded dictionaries.
      */
     mail_dict_init();
 

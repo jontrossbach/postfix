@@ -102,6 +102,7 @@
 #include <own_inet_addr.h>
 #include <wildcard_inet_addr.h>
 #include <mail_conf.h>
+#include <compat_level.h>
 
 /* Local stuff. */
 
@@ -368,8 +369,12 @@ MASTER_SERV *get_master_ent()
 	} else {
 	    MASTER_INET_ADDRLIST(serv) =
 		strcasecmp(saved_interfaces, INET_INTERFACES_ALL) ?
-		own_inet_addr_list() :		/* virtual */
-		wildcard_inet_addr_list();	/* wild-card */
+		own_inet_addr_list() :		/* result can be empty */
+		wildcard_inet_addr_list();	/* result can't be empty */
+	    if (MASTER_INET_ADDRLIST(serv)->used == 0)
+		fatal_with_context("service definition requires valid"
+				   " host name or address, or non-empty"
+				   " %s setting", VAR_INET_INTERFACES);
 	    inet_addr_list_uniq(MASTER_INET_ADDRLIST(serv));
 	    serv->listen_fd_count = MASTER_INET_ADDRLIST(serv)->used;
 	}
@@ -490,7 +495,9 @@ MASTER_SERV *get_master_ent()
      * XXX Chroot cannot imply unprivileged service (for example, the pickup
      * service runs chrooted but needs privileges to open files as the user).
      */
-    chroot = get_bool_ent(&bufp, "chroot", var_compat_level < 1 ? "y" : "n");
+    chroot = get_bool_ent(&bufp, "chroot", compat_level
+		     < compat_level_from_string(COMPAT_LEVEL_1, msg_panic) ?
+			  "y" : "n");
 
     /*
      * Wakeup timer. XXX should we require that var_proc_limit == 1? Right

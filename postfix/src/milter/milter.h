@@ -79,7 +79,7 @@ extern MILTER_MACROS *milter_macros_create(const char *, const char *,
 					        const char *, const char *);
 extern MILTER_MACROS *milter_macros_alloc(int);
 extern void milter_macros_free(MILTER_MACROS *);
-extern int milter_macros_print(ATTR_PRINT_COMMON_FN, VSTREAM *, int, void *);
+extern int milter_macros_print(ATTR_PRINT_COMMON_FN, VSTREAM *, int, const void *);
 extern int milter_macros_scan(ATTR_SCAN_COMMON_FN, VSTREAM *, int, void *);
 
 #define MILTER_MACROS_ALLOC_ZERO	1	/* null pointer */
@@ -100,7 +100,7 @@ typedef const char *(*MILTER_DEL_HEADER_FN) (void *, ssize_t, const char *);
 typedef const char *(*MILTER_EDIT_FROM_FN) (void *, const char *, const char *);
 typedef const char *(*MILTER_EDIT_RCPT_FN) (void *, const char *);
 typedef const char *(*MILTER_EDIT_RCPT_PAR_FN) (void *, const char *, const char *);
-typedef const char *(*MILTER_EDIT_BODY_FN) (void *, int, VSTRING *);
+typedef const char *(*MILTER_EDIT_BODY_FN) (void *, int, int, VSTRING *);
 
 typedef struct MILTERS {
     MILTER *milter_list;		/* linked list of Milters */
@@ -186,6 +186,7 @@ extern void milter_free(MILTERS *);
 #define S8_MAC_TLS_VERSION	"{tls_version}"
 #define S8_MAC_CIPHER		"{cipher}"
 #define S8_MAC_CIPHER_BITS	"{cipher_bits}"
+#define S8_MAC_TLS_SNI		"{tls_sni}"
 #define S8_MAC_CERT_SUBJECT	"{cert_subject}"
 #define S8_MAC_CERT_ISSUER	"{cert_issuer}"
 

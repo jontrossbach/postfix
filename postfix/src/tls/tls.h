@@ -50,7 +50,8 @@
 #define TLS_LEV_VERIFY		7	/* certificate verified */
 #define TLS_LEV_SECURE		8	/* "secure" verification */
 
-#define TLS_REQUIRED(l)		((l) > TLS_LEV_MAY)
+#define TLS_REQUIRED_BY_SECURITY_LEVEL(l) \
+				((l) > TLS_LEV_MAY)
 #define TLS_MUST_MATCH(l)	((l) > TLS_LEV_ENCRYPT)
 #define TLS_MUST_PKIX(l)	((l) >= TLS_LEV_VERIFY)
 #define TLS_OPPORTUNISTIC(l)	((l) == TLS_LEV_MAY || (l) == TLS_LEV_DANE)
@@ -74,14 +75,26 @@ extern const char *str_tls_level(int);
 #include <openssl/x509v3.h>
 #include <openssl/rand.h>
 #include <openssl/crypto.h>		/* Legacy SSLEAY_VERSION_NUMBER */
+#include <openssl/evp.h>		/* New OpenSSL 3.0 EVP_PKEY APIs */
 #include <openssl/opensslv.h>		/* OPENSSL_VERSION_NUMBER */
 #include <openssl/ssl.h>
+#include <openssl/conf.h>
+#include <openssl/tls1.h>		/* TLS extensions */
 
  /* Appease indent(1) */
 #define x509_stack_t STACK_OF(X509)
 #define general_name_stack_t STACK_OF(GENERAL_NAME)
 #define ssl_cipher_stack_t STACK_OF(SSL_CIPHER)
 #define ssl_comp_stack_t STACK_OF(SSL_COMP)
+
+/*-
+ * Official way to check minimum OpenSSL API version from 3.0 onward.
+ * We simply define it false for all prior versions, where we typically also
+ * need the patch level to determine API compatibility.
+ */
+#ifndef OPENSSL_VERSION_PREREQ
+#define OPENSSL_VERSION_PREREQ(m,n) 0
+#endif
 
 #if (OPENSSL_VERSION_NUMBER < 0x1010100fUL)
 #error "OpenSSL releases prior to 1.1.1 are no longer supported"
@@ -101,6 +114,43 @@ extern const char *str_tls_level(int);
 #define tls_get_peer_dh_pubkey SSL_get_server_tmp_key
 #else
 #define tls_get_peer_dh_pubkey SSL_get_peer_tmp_key
+#endif
+
+#if OPENSSL_VERSION_PREREQ(3,0)
+#define TLS_PEEK_PEER_CERT(ssl) SSL_get0_peer_certificate(ssl)
+#define TLS_FREE_PEER_CERT(x)   ((void) 0)
+#define tls_set_bio_callback    BIO_set_callback_ex
+#else
+#define TLS_PEEK_PEER_CERT(ssl) SSL_get_peer_certificate(ssl)
+#define TLS_FREE_PEER_CERT(x)   X509_free(x)
+#define tls_set_bio_callback    BIO_set_callback
+#endif
+
+#if OPENSSL_VERSION_PREREQ(3,2)
+#define TLS_GROUP_NAME(ssl) SSL_get0_group_name(ssl)
+#elif OPENSSL_VERSION_PREREQ(3,0)
+#define TLS_GROUP_NAME(ssl) \
+    SSL_group_to_name((ssl), SSL_get_negotiated_group(ssl))
+#else
+#define TLS_GROUP_NAME(ssl) ((const char *)0)
+#endif
+
+#if OPENSSL_VERSION_PREREQ(4,0)
+#define TLS_ADD1_HOST   SSL_add1_dnsname
+#define TLS_SET1_HOST   SSL_set1_dnsname
+#else
+#define TLS_ADD1_HOST   SSL_add1_host
+#define TLS_SET1_HOST   SSL_set1_host
+#endif
+
+ /*
+  * SSL_trace() is built into OpenSSL only when the library is configured
+  * with "enable-ssl-trace". This is the upstream default, but some
+  * distributions disable it. Postfix can also opt out at build time with
+  * CCARGS=-DNO_TLS_TRACE.
+  */
+#if !defined(OPENSSL_NO_SSL_TRACE) && !defined(NO_TLS_TRACE)
+#define HAVE_SSL_TRACE
 #endif
 
  /*
@@ -182,8 +232,8 @@ extern void tls_dane_flush(void);
 extern TLS_DANE *tls_dane_alloc(void);
 extern void tls_tlsa_free(TLS_TLSA *);
 extern void tls_dane_free(TLS_DANE *);
-extern void tls_dane_add_fpt_digests(TLS_DANE *, const char *, const char *,
-				             int);
+extern void tls_dane_add_fpt_digests(TLS_DANE *, int, const char *,
+				             const char *, int);
 extern TLS_DANE *tls_dane_resolve(unsigned, const char *, DNS_RR *, int);
 extern int tls_dane_load_trustfile(TLS_DANE *, const char *);
 
@@ -211,6 +261,8 @@ typedef struct {
     const char *kex_name;		/* shared key-exchange algorithm */
     const char *kex_curve;		/* shared key-exchange ECDHE curve */
     int     kex_bits;			/* shared FFDHE key exchange bits */
+    int     ctos_rpk;			/* Did the client send an RPK? */
+    int     stoc_rpk;			/* Did the server send an RPK? */
     const char *clnt_sig_name;		/* client's signature key algorithm */
     const char *clnt_sig_curve;		/* client's ECDSA curve name */
     int     clnt_sig_bits;		/* client's RSA signature key bits */
@@ -219,10 +271,11 @@ typedef struct {
     const char *srvr_sig_curve;		/* server's ECDSA curve name */
     int     srvr_sig_bits;		/* server's RSA signature key bits */
     const char *srvr_sig_dgst;		/* server's signature digest */
+    int     rpt_reported;		/* Failure was reported with TLSRPT */
     /* Private. */
     SSL    *con;
     char   *cache_type;			/* tlsmgr(8) cache type if enabled */
-    int     ticketed;			/* Session ticket issued */
+    int     ticketed;			/* Issued (server) or cached (client) */
     char   *serverid;			/* unique server identifier */
     char   *namaddr;			/* nam[addr] for logging */
     int     log_mask;			/* What to log */
@@ -233,23 +286,32 @@ typedef struct {
     VSTREAM *stream;			/* Blocking-mode SMTP session */
     /* DANE TLSA trust input and verification state */
     const TLS_DANE *dane;		/* DANE TLSA digests */
-    X509   *errorcert;			/* Error certificate closest to leaf */
+    const X509 *errorcert;		/* Error certificate closest to leaf */
     int     errordepth;			/* Chain depth of error cert */
     int     errorcode;			/* First error at error depth */
     int     must_fail;			/* Failed to load trust settings */
+    char   *ffail_type;			/* Forced verification failure */
+    /* SSL protocol trace; populated when log_mask has TLS_LOG_TRACE. */
+    BIO    *trace_bio;			/* destination BIO, or NULL */
+    int     trace_size_limit;		/* size cap; <= 0 means "stop now" */
+    /* End of Private members. */
 } TLS_SESS_STATE;
 
  /*
   * Peer status bits. TLS_CERT_FLAG_MATCHED implies TLS_CERT_FLAG_TRUSTED
   * only in the case of a hostname match.
   */
-#define TLS_CERT_FLAG_PRESENT		(1<<0)
+#define TLS_CRED_FLAG_CERT		(1<<0)
 #define TLS_CERT_FLAG_ALTNAME		(1<<1)
 #define TLS_CERT_FLAG_TRUSTED		(1<<2)
 #define TLS_CERT_FLAG_MATCHED		(1<<3)
 #define TLS_CERT_FLAG_SECURED		(1<<4)
+#define TLS_CRED_FLAG_RPK		(1<<5)
+#define TLS_CRED_FLAG_ANY	(TLS_CRED_FLAG_CERT|TLS_CRED_FLAG_RPK)
 
-#define TLS_CERT_IS_PRESENT(c) ((c) && ((c)->peer_status&TLS_CERT_FLAG_PRESENT))
+#define TLS_CRED_IS_PRESENT(c) ((c) && ((c)->peer_status&TLS_CRED_FLAG_ANY))
+#define TLS_CERT_IS_PRESENT(c) ((c) && ((c)->peer_status&TLS_CRED_FLAG_CERT))
+#define TLS_RPK_IS_PRESENT(c)  ((c) && ((c)->peer_status&TLS_CRED_FLAG_RPK))
 #define TLS_CERT_IS_ALTNAME(c) ((c) && ((c)->peer_status&TLS_CERT_FLAG_ALTNAME))
 #define TLS_CERT_IS_TRUSTED(c) ((c) && ((c)->peer_status&TLS_CERT_FLAG_TRUSTED))
 #define TLS_CERT_IS_MATCHED(c) ((c) && ((c)->peer_status&TLS_CERT_FLAG_MATCHED))
@@ -281,13 +343,13 @@ extern int tls_log_mask(const char *, const char *);
 #define TLS_LOG_TLSPKTS			(1<<8)
 #define TLS_LOG_ALLPKTS			(1<<9)
 #define TLS_LOG_DANE			(1<<10)
+#define TLS_LOG_TRACE			(1<<11)
 
  /*
   * Client and Server application contexts
   */
 struct TLS_APPL_STATE {
     SSL_CTX *ssl_ctx;
-    SSL_CTX *sni_ctx;
     int     log_mask;
     char   *cache_type;
 };
@@ -302,6 +364,7 @@ extern void tls_free_app_context(TLS_APPL_STATE *);
   * tls_misc.c
   */
 extern void tls_param_init(void);
+extern int tls_library_init(void);
 
  /*
   * Protocol selection.
@@ -367,6 +430,13 @@ extern void tls_param_init(void);
 #define SSL_OP_NO_TLSv1_3	0L	/* Noop */
 #endif
 
+/*
+ * Always used when defined, SMTP has no truncation attacks.
+ */
+#ifndef SSL_OP_IGNORE_UNEXPECTED_EOF
+#define SSL_OP_IGNORE_UNEXPECTED_EOF    0L
+#endif
+
 #define TLS_KNOWN_PROTOCOLS \
 	( TLS_PROTOCOL_SSLv2 | TLS_PROTOCOL_SSLv3 | TLS_PROTOCOL_TLSv1 \
 	   | TLS_PROTOCOL_TLSv1_1 | TLS_PROTOCOL_TLSv1_2 | TLS_PROTOCOL_TLSv1_3 )
@@ -383,7 +453,8 @@ extern void tls_param_init(void);
  * just exposed via hex codes or named elements of tls_ssl_options.
  */
 #define TLS_SSL_OP_MANAGED_BITS \
-	(SSL_OP_CIPHER_SERVER_PREFERENCE | TLS_SSL_OP_PROTOMASK(~0))
+	(SSL_OP_CIPHER_SERVER_PREFERENCE | SSL_OP_IGNORE_UNEXPECTED_EOF | \
+	 TLS_SSL_OP_PROTOMASK(~0))
 
 extern int tls_proto_mask_lims(const char *, int *, int *);
 
@@ -439,9 +510,12 @@ typedef struct {
 
 typedef struct {
     TLS_APPL_STATE *ctx;
+    const char *log_param;
+    const char *log_level;
     VSTREAM *stream;
     int     fd;				/* Event-driven file descriptor */
     int     timeout;
+    int     enable_rpk;			/* Solicit server raw public keys */
     int     tls_level;			/* Security level */
     const char *nexthop;		/* destination domain */
     const char *host;			/* MX hostname */
@@ -455,6 +529,12 @@ typedef struct {
     const ARGV *matchargv;		/* Cert match patterns */
     const char *mdalg;			/* default message digest algorithm */
     const TLS_DANE *dane;		/* DANE TLSA verification */
+    struct TLSRPT_WRAPPER *tlsrpt;	/* RFC 8460 reporting */
+    char   *ffail_type;			/* Forced verification failure */
+    int     trace_size_limit;		/* TLS protocol trace size limit */
+    BIO    *(*trace_open) (void *, const char *);	/* override dest */
+    void   *trace_arg;			/* opaque trace_open argument */
+    char   *trace_peer;			/* Printable peer IP address */
 } TLS_CLIENT_START_PROPS;
 
 extern TLS_APPL_STATE *tls_client_init(const TLS_CLIENT_INIT_PROPS *);
@@ -478,12 +558,15 @@ extern TLS_SESS_STATE *tls_client_post_connect(TLS_SESS_STATE *,
     a6, a7, a8, a9, a10, a11, a12, a13, a14))
 
 #define TLS_CLIENT_START(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, \
-    a10, a11, a12, a13, a14, a15, a16, a17) \
+    a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, \
+    a23, a24, a25, a26) \
     tls_client_start((((props)->a1), ((props)->a2), ((props)->a3), \
     ((props)->a4), ((props)->a5), ((props)->a6), ((props)->a7), \
     ((props)->a8), ((props)->a9), ((props)->a10), ((props)->a11), \
     ((props)->a12), ((props)->a13), ((props)->a14), ((props)->a15), \
-    ((props)->a16), ((props)->a17), (props)))
+    ((props)->a16), ((props)->a17), ((props)->a18), ((props)->a19), \
+    ((props)->a20), ((props)->a21), ((props)->a22), ((props)->a23), \
+    ((props)->a24), ((props)->a25), ((props)->a26), (props)))
 
  /*
   * tls_server.c
@@ -513,15 +596,22 @@ typedef struct {
 
 typedef struct {
     TLS_APPL_STATE *ctx;		/* TLS application context */
+    const char *log_param;
+    const char *log_level;
     VSTREAM *stream;			/* Client stream */
     int     fd;				/* Event-driven file descriptor */
     int     timeout;			/* TLS handshake timeout */
+    int     enable_rpk;			/* Solicit client raw public keys */
     int     requirecert;		/* Insist on client cert? */
     const char *serverid;		/* Server instance (salt cache key) */
     const char *namaddr;		/* Client nam[addr] for logging */
     const char *cipher_grade;
     const char *cipher_exclusions;
     const char *mdalg;			/* default message digest algorithm */
+    int     trace_size_limit;		/* TLS protocol trace size limit */
+    BIO    *(*trace_open) (void *, const char *);	/* override dest */
+    void   *trace_arg;			/* opaque trace_open argument */
+    char   *trace_peer;			/* Printable peer IP address */
 } TLS_SERVER_START_PROPS;
 
 extern TLS_APPL_STATE *tls_server_init(const TLS_SERVER_INIT_PROPS *);
@@ -531,19 +621,27 @@ extern TLS_SESS_STATE *tls_server_post_accept(TLS_SESS_STATE *);
 #define tls_server_stop(ctx, stream, timeout, failure, TLScontext) \
 	tls_session_stop(ctx, (stream), (timeout), (failure), (TLScontext))
 
-#define TLS_SERVER_INIT(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, \
+#define TLS_SERVER_INIT_ARGS(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, \
     a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20) \
-    tls_server_init((((props)->a1), ((props)->a2), ((props)->a3), \
+    (((props)->a1), ((props)->a2), ((props)->a3), \
     ((props)->a4), ((props)->a5), ((props)->a6), ((props)->a7), \
     ((props)->a8), ((props)->a9), ((props)->a10), ((props)->a11), \
     ((props)->a12), ((props)->a13), ((props)->a14), ((props)->a15), \
     ((props)->a16), ((props)->a17), ((props)->a18), ((props)->a19), \
-    ((props)->a20), (props)))
+    ((props)->a20), (props))
 
-#define TLS_SERVER_START(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) \
+#define TLS_SERVER_INIT(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, \
+    a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20) \
+    tls_server_init(TLS_SERVER_INIT_ARGS(props, a1, a2, a3, a4, a5, a6, \
+    a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20))
+
+#define TLS_SERVER_START(props, a1, a2, a3, a4, a5, a6, a7, a8, a9, \
+    a10, a11, a12, a13, a14, a15, a16, a17) \
     tls_server_start((((props)->a1), ((props)->a2), ((props)->a3), \
     ((props)->a4), ((props)->a5), ((props)->a6), ((props)->a7), \
-    ((props)->a8), ((props)->a9), ((props)->a10), (props)))
+    ((props)->a8), ((props)->a9), ((props)->a10), ((props)->a11), \
+    ((props)->a12), ((props)->a13), ((props)->a14), ((props)->a15), \
+    ((props)->a16), ((props)->a17), (props)))
 
  /*
   * tls_session.c
@@ -604,8 +702,8 @@ extern int tls_bio(int, int, TLS_SESS_STATE *,
   * tls_dh.c
   */
 extern void tls_set_dh_from_file(const char *);
-extern void tls_tmp_dh(SSL_CTX *);
-extern void tls_auto_eecdh_curves(SSL_CTX *, const char *);
+extern void tls_tmp_dh(SSL_CTX *, int);
+extern void tls_auto_groups(SSL_CTX *, const char *, const char *);
 
  /*
   * tls_verify.c
@@ -613,7 +711,7 @@ extern void tls_auto_eecdh_curves(SSL_CTX *, const char *);
 extern char *tls_peer_CN(X509 *, const TLS_SESS_STATE *);
 extern char *tls_issuer_CN(X509 *, const TLS_SESS_STATE *);
 extern int tls_verify_certificate_callback(int, X509_STORE_CTX *);
-extern void tls_log_verify_error(TLS_SESS_STATE *);
+extern void tls_log_verify_error(TLS_SESS_STATE *, struct TLSRPT_WRAPPER *);
 
  /*
   * tls_dane.c
@@ -627,9 +725,10 @@ extern TLS_TLSA *tlsa_prepend(TLS_TLSA *, uint8_t, uint8_t, uint8_t,
  /*
   * tls_fprint.c
   */
+extern const EVP_MD *tls_digest_byname(const char *, EVP_MD_CTX **);
 extern char *tls_digest_encode(const unsigned char *, int);
 extern char *tls_cert_fprint(X509 *, const char *);
-extern char *tls_pkey_fprint(X509 *, const char *);
+extern char *tls_pkey_fprint(EVP_PKEY *, const char *);
 extern char *tls_serverid_digest(TLS_SESS_STATE *,
 		              const TLS_CLIENT_START_PROPS *, const char *);
 
@@ -648,15 +747,48 @@ extern int tls_set_my_certificate_key_info(SSL_CTX *, /* All */ const char *,
   */
 extern int TLScontext_index;
 
-extern TLS_APPL_STATE *tls_alloc_app_context(SSL_CTX *, SSL_CTX *, int);
+extern TLS_APPL_STATE *tls_alloc_app_context(SSL_CTX *, int);
 extern TLS_SESS_STATE *tls_alloc_sess_context(int, const char *);
 extern void tls_free_context(TLS_SESS_STATE *);
 extern void tls_check_version(void);
 extern long tls_bug_bits(void);
 extern void tls_print_errors(void);
 extern void tls_info_callback(const SSL *, int, int);
+extern int tls_cert_cb(SSL *, void *);
+
+#if OPENSSL_VERSION_PREREQ(3,0)
+extern long tls_bio_dump_cb(BIO *, int, const char *, size_t, int, long,
+			            int, size_t *);
+
+#else
 extern long tls_bio_dump_cb(BIO *, int, const char *, int, long, long);
+
+#endif
 extern const EVP_MD *tls_validate_digest(const char *);
+extern void tls_enable_client_rpk(SSL_CTX *, SSL *);
+extern void tls_enable_server_rpk(SSL_CTX *, SSL *);
+
+#ifdef HAVE_SSL_TRACE
+extern void tls_msg_callback(int, int, int, const void *, size_t,
+			             SSL *, void *);
+
+ /*
+  * Default trace destination: a file under tlstrace/. This is the default
+  * for daemon programs that do not supply start_props->trace_open. The real
+  * work is done in tls_trace_create_file().
+  */
+#define TLS_TRACE_QDIR	"tlstrace"
+extern bool tls_trace_rate_ok(int);
+extern BIO *tls_trace_create_qfile(const char *);
+
+ /*
+  * Append <process_name>-<yyyymmddhhmmss>.<usec>-<peer>-XXXXXX to the path
+  * buffer, then create the named file with mkstemp() and wrap it in an
+  * OpenSSL file BIO.
+  */
+extern BIO *tls_trace_create_file(VSTRING *, const char *);
+
+#endif
 
  /*
   * tls_seed.c

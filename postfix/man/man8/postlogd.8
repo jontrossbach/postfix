@@ -13,8 +13,8 @@ Postfix internal log server
 .ad
 .fi
 This program logs events on behalf of Postfix programs
-when the maillog configuration parameter specifies a non\-empty
-value.
+when the maillog_file configuration parameter specifies a
+non\-empty value.
 .SH BUGS
 .ad
 .fi
@@ -34,17 +34,17 @@ Other non\-daemon Postfix programs will never write directly to
 with the operation of some of these programs). These programs
 can log to \fBpostlogd\fR(8) if they are run by the super\-user,
 or if their executable file has set\-gid permission. Do not
-set this permission on programs other than \fBpostdrop\fR(1)
-and \fBpostqueue\fR(1).
+set this permission on programs other than \fBpostdrop\fR(1),
+\fBpostqueue\fR(1) and (Postfix >= 3.7) \fBpostlog\fR(1).
 .SH "CONFIGURATION PARAMETERS"
 .na
 .nf
 .ad
 .fi
-Changes to \fBmain.cf\fR are picked up automatically, as
-\fBpostlogd\fR(8) processes run for only a limited amount
-of time. Use the command "\fBpostfix reload\fR" to speed
-up a change.
+Changes to \fBmain.cf\fR are not picked up automatically,
+because \fBpostlogd\fR(8) terminates only after reaching
+the \fBmax_idle\fR time limit.
+Use the command "\fBpostfix reload\fR" to speed up a change.
 
 The text below provides only a parameter summary. See
 \fBpostconf\fR(5) for more details including examples.
@@ -66,6 +66,12 @@ The master.cf service name of a Postfix daemon process.
 .IP "\fBpostlogd_watchdog_timeout (10s)\fR"
 How much time a \fBpostlogd\fR(8) process may take to process a request
 before it is terminated by a built\-in watchdog timer.
+.PP
+Available in Postfix 3.9 and later:
+.IP "\fBmaillog_file_permissions (0600)\fR"
+The file access permissions that will be set when the file
+$maillog_file is created for the first time, or when the file is
+created after an existing file is rotated.
 .SH "SEE ALSO"
 .na
 .nf
@@ -100,3 +106,6 @@ Wietse Venema
 Google, Inc.
 111 8th Avenue
 New York, NY 10011, USA
+
+Wietse Venema
+porcupine.org

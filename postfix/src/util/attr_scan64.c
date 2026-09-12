@@ -88,6 +88,8 @@
 /*	same input attribute list.
 /*	By default, attr_scan64() skips forward past the input attribute list
 /*	terminator.
+/* .IP ATTR_FLAG_PRINTABLE
+/*	Santize received string values with printable(_, '?').
 /* .IP ATTR_FLAG_STRICT
 /*	For convenience, this value combines both ATTR_FLAG_MISSING and
 /*	ATTR_FLAG_EXTRA.
@@ -100,8 +102,13 @@
 /*	This argument is followed by an attribute name and an integer pointer.
 /* .IP "RECV_ATTR_LONG(const char *name, long *ptr)"
 /*	This argument is followed by an attribute name and a long pointer.
+/* .IP "RECV_ATTR_BOOL(const char *name, bool *ptr)"
+/*	This argument is followed by an attribute name and a pointer to bool.
 /* .IP "RECV_ATTR_STR(const char *name, VSTRING *vp)"
 /*	This argument is followed by an attribute name and a VSTRING pointer.
+/* .IP "RECV_ATTR_STREQ(const char *name, const char *value)"
+/*	The name and value must match what the client sends.
+/*	This attribute does not increment the result value.
 /* .IP "RECV_ATTR_DATA(const char *name, VSTRING *vp)"
 /*	This argument is followed by an attribute name and a VSTRING pointer.
 /* .IP "RECV_ATTR_FUNC(ATTR_SCAN_CUSTOM_FN, void *data)"
@@ -159,6 +166,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -176,6 +186,7 @@
 #include <vstring.h>
 #include <htable.h>
 #include <base64_code.h>
+#include <stringops.h>
 #include <attr.h>
 
 /* Application specific. */
@@ -264,6 +275,30 @@ static int attr_scan64_long_number(VSTREAM *fp, unsigned long *ptr,
     return (ch);
 }
 
+/* attr_scan64_bool - pull a boolean value from the input stream */
+
+static int attr_scan64_bool(VSTREAM *fp, bool * ptr, VSTRING *str_buf,
+			            const char *context)
+{
+    unsigned number;
+    int     ch;
+
+    if ((ch = attr_scan64_number(fp, &number, str_buf, context)) < 0)
+	return (-1);
+    switch (number) {
+    case 0:
+	*ptr = false;
+	return (ch);
+    case 1:
+	*ptr = true;
+	return (ch);
+    default:
+	msg_warn("malformed boolean value from %s while reading %s: %.100s",
+		 VSTREAM_PATH(fp), context, STR(str_buf));
+	return (-1);
+    }
+}
+
 /* attr_vscan64 - receive attribute list from stream */
 
 int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
@@ -275,12 +310,14 @@ int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
     char   *wanted_name;
     unsigned int *number;
     unsigned long *long_number;
+    bool   *bool_val;
     VSTRING *string;
     HTABLE *hash_table;
     int     ch;
     int     conversions;
     ATTR_SCAN_CUSTOM_FN scan_fn;
     void   *scan_arg;
+    const char *expect_val;
 
     /*
      * Sanity check.
@@ -432,6 +469,22 @@ int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
 		return (-1);
 	    }
 	    break;
+	case ATTR_TYPE_BOOL:
+	    if (ch != ':') {
+		msg_warn("missing value for boolean attribute %s from %s",
+			 STR(name_buf), VSTREAM_PATH(fp));
+		return (-1);
+	    }
+	    bool_val = va_arg(ap, bool *);
+	    if ((ch = attr_scan64_bool(fp, bool_val, str_buf,
+				       "input attribute value")) < 0)
+		return (-1);
+	    if (ch != '\n') {
+		msg_warn("multiple values for attribute %s from %s",
+			 STR(name_buf), VSTREAM_PATH(fp));
+		return (-1);
+	    }
+	    break;
 	case ATTR_TYPE_STR:
 	    if (ch != ':') {
 		msg_warn("missing value for string attribute %s from %s",
@@ -447,6 +500,8 @@ int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
 			 STR(name_buf), VSTREAM_PATH(fp));
 		return (-1);
 	    }
+	    if (flags & ATTR_FLAG_PRINTABLE)
+		(void) printable(STR(string), '?');
 	    break;
 	case ATTR_TYPE_DATA:
 	    if (ch != ':') {
@@ -470,6 +525,29 @@ int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
 	    if (scan_fn(attr_scan64, fp, flags | ATTR_FLAG_MORE, scan_arg) < 0)
 		return (-1);
 	    break;
+	case ATTR_TYPE_STREQ:
+	    if (ch != ':') {
+		msg_warn("missing value for string attribute %s from %s",
+			 STR(name_buf), VSTREAM_PATH(fp));
+		return (-1);
+	    }
+	    expect_val = va_arg(ap, const char *);
+	    if ((ch = attr_scan64_string(fp, str_buf,
+					 "input attribute value")) < 0)
+		return (-1);
+	    if (ch != '\n') {
+		msg_warn("multiple values for attribute %s from %s",
+			 STR(name_buf), VSTREAM_PATH(fp));
+		return (-1);
+	    }
+	    if (strcmp(expect_val, STR(str_buf)) != 0) {
+		msg_warn("unexpected %s %s from %s (expected: %s)",
+			 STR(name_buf), STR(str_buf), VSTREAM_PATH(fp),
+			 expect_val);
+		return (-1);
+	    }
+	    conversions -= 1;
+	    break;
 	case ATTR_TYPE_HASH:
 	case ATTR_TYPE_CLOSE:
 	    if (ch != ':') {
@@ -484,6 +562,10 @@ int     attr_vscan64(VSTREAM *fp, int flags, va_list ap)
 		msg_warn("multiple values for attribute %s from %s",
 			 STR(name_buf), VSTREAM_PATH(fp));
 		return (-1);
+	    }
+	    if (flags & ATTR_FLAG_PRINTABLE) {
+		(void) printable(STR(name_buf), '?');
+		(void) printable(STR(str_buf), '?');
 	    }
 	    if (htable_locate(hash_table, STR(name_buf)) != 0) {
 		if ((flags & ATTR_FLAG_EXTRA) != 0) {
@@ -566,21 +648,25 @@ int     main(int unused_argc, char **used_argv)
     int     int_val;
     long    long_val;
     long    long_val2;
+    bool    bool_val;
     int     ret;
 
     msg_verbose = 1;
     msg_vstream_init(used_argv[0], VSTREAM_ERR);
     if ((ret = attr_scan64(VSTREAM_IN,
 			   ATTR_FLAG_STRICT,
+			   RECV_ATTR_STREQ("protocol", "test"),
 			   RECV_ATTR_INT(ATTR_NAME_INT, &int_val),
 			   RECV_ATTR_LONG(ATTR_NAME_LONG, &long_val),
+			   RECV_ATTR_BOOL(ATTR_NAME_BOOL, &bool_val),
 			   RECV_ATTR_STR(ATTR_NAME_STR, str_val),
 			   RECV_ATTR_DATA(ATTR_NAME_DATA, data_val),
 			   RECV_ATTR_HASH(table),
 			   RECV_ATTR_LONG(ATTR_NAME_LONG, &long_val2),
-			   ATTR_TYPE_END)) > 4) {
+			   ATTR_TYPE_END)) > 5) {
 	vstream_printf("%s %d\n", ATTR_NAME_INT, int_val);
 	vstream_printf("%s %ld\n", ATTR_NAME_LONG, long_val);
+	vstream_printf("%s %d\n", ATTR_NAME_BOOL, bool_val);
 	vstream_printf("%s %s\n", ATTR_NAME_STR, STR(str_val));
 	vstream_printf("%s %s\n", ATTR_NAME_DATA, STR(data_val));
 	ht_info_list = htable_list(table);
@@ -593,13 +679,16 @@ int     main(int unused_argc, char **used_argv)
     }
     if ((ret = attr_scan64(VSTREAM_IN,
 			   ATTR_FLAG_STRICT,
+			   RECV_ATTR_STREQ("protocol", "test"),
 			   RECV_ATTR_INT(ATTR_NAME_INT, &int_val),
 			   RECV_ATTR_LONG(ATTR_NAME_LONG, &long_val),
+			   RECV_ATTR_BOOL(ATTR_NAME_BOOL, &bool_val),
 			   RECV_ATTR_STR(ATTR_NAME_STR, str_val),
 			   RECV_ATTR_DATA(ATTR_NAME_DATA, data_val),
-			   ATTR_TYPE_END)) == 4) {
+			   ATTR_TYPE_END)) == 5) {
 	vstream_printf("%s %d\n", ATTR_NAME_INT, int_val);
 	vstream_printf("%s %ld\n", ATTR_NAME_LONG, long_val);
+	vstream_printf("%s %d\n", ATTR_NAME_BOOL, bool_val);
 	vstream_printf("%s %s\n", ATTR_NAME_STR, STR(str_val));
 	vstream_printf("%s %s\n", ATTR_NAME_DATA, STR(data_val));
 	ht_info_list = htable_list(table);
@@ -609,6 +698,11 @@ int     main(int unused_argc, char **used_argv)
     } else {
 	vstream_printf("return: %d\n", ret);
     }
+    if ((ret = attr_scan64(VSTREAM_IN,
+			   ATTR_FLAG_STRICT,
+			   RECV_ATTR_STREQ("protocol", "test"),
+			   ATTR_TYPE_END)) != 0)
+	vstream_printf("return: %d\n", ret);
     if (vstream_fflush(VSTREAM_OUT) != 0)
 	msg_fatal("write error: %m");
 

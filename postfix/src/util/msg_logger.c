@@ -59,6 +59,9 @@
 /*	Override the fallback setting (see above) with the specified
 /*	function pointer. This remains in effect until the next
 /*	msg_logger_init() or msg_logger_control() call.
+/*	When the function is called with a null argument, it should
+/*	allocate resources immediately. This is needed in programs
+/*	that drop privileges after process initialization.
 /* .IP CA_MSG_LOGGER_CTL_DISABLE
 /*	Disable the msg_logger. This remains in effect until the
 /*	next msg_logger_init() call.
@@ -80,6 +83,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
  /*
@@ -159,7 +165,7 @@ static void msg_logger_disconnect(void)
 
 /* msg_logger_print - log info to service or file */
 
-static void msg_logger_print(int level, const char *text)
+static void msg_logger_print(int level, const char *text, void *unused)
 {
     time_t  now;
     struct tm *lt;
@@ -282,7 +288,7 @@ void    msg_logger_init(const char *progname, const char *hostname,
      */
     if (first_call) {
 	first_call = 0;
-	msg_output(msg_logger_print);
+	msg_output_push(msg_logger_print, (void *) 0);
 	msg_logger_buf = vstring_alloc(2048);
     }
 
@@ -320,6 +326,9 @@ void    msg_logger_control(int name,...)
 	    msg_logger_disconnect();
 	    if (MSG_LOGGER_NEED_SOCKET())
 		msg_logger_connect();
+	    if (msg_logger_sock == MSG_LOGGER_SOCK_NONE
+		&& msg_logger_fallback_fn)
+		msg_logger_fallback_fn((char *) 0);
 	    break;
 	default:
 	    msg_panic("%s: bad name %d", myname, name);

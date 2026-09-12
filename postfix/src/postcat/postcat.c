@@ -4,7 +4,7 @@
 /* SUMMARY
 /*	show Postfix queue file contents
 /* SYNOPSIS
-/*	\fBpostcat\fR [\fB-bdehnoqv\fR] [\fB-c \fIconfig_dir\fR] [\fIfiles\fR...]
+/*	\fBpostcat\fR [\fB-bdefhnoqv\fR] [\fB-c \fIconfig_dir\fR] [\fIfiles\fR...]
 /* DESCRIPTION
 /*	The \fBpostcat\fR(1) command prints the contents of the
 /*	named \fIfiles\fR in human-readable form. The files are
@@ -33,6 +33,10 @@
 /*	Show message envelope content.
 /* .sp
 /*	This feature is available in Postfix 2.7 and later.
+/* .IP \fB-f\fR
+/*	Prepend the file name to each output line.
+/* .sp
+/*	This feature is available in Postfix 3.10 and later.
 /* .IP \fB-h\fR
 /*	Show message header content.  The \fB-h\fR option produces
 /*	output from the beginning of the message up to, but not
@@ -46,6 +50,14 @@
 /*	of taking the names literally.
 /*
 /*	This feature is available in Postfix 2.0 and later.
+/* .IP \fB-r\fR
+/*	Print records in file order, don't follow pointer records.
+/*
+/*	This feature is available in Postfix 3.7 and later.
+/* .IP "\fB-s \fIoffset\fR"
+/*	Skip to the specified queue file offset.
+/*
+/*	This feature is available in Postfix 3.7 and later.
 /* .IP \fB-v\fR
 /*	Enable verbose logging for debugging purposes. Multiple \fB-v\fR
 /*	options make the software increasingly verbose.
@@ -68,7 +80,7 @@
 /*	The default location of the Postfix main.cf and master.cf
 /*	configuration files.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBqueue_directory (see 'postconf -d' output)\fR"
@@ -138,6 +150,8 @@
 #define PC_FLAG_PRINT_BODY	(1<<4)	/* print body records */
 #define PC_FLAG_PRINT_RTYPE_DEC	(1<<5)	/* print decimal record type */
 #define PC_FLAG_PRINT_RTYPE_SYM	(1<<6)	/* print symbolic record type */
+#define PC_FLAG_RAW		(1<<7)	/* don't follow pointers */
+#define PC_FLAG_PRINT_PATHNAME	(1<<8)	/* print pathname */
 
 #define PC_MASK_PRINT_TEXT	(PC_FLAG_PRINT_HEADER | PC_FLAG_PRINT_BODY)
 #define PC_MASK_PRINT_ALL	(PC_FLAG_PRINT_ENV | PC_MASK_PRINT_TEXT)
@@ -148,6 +162,8 @@
 #define PC_STATE_ENV	0		/* initial or extracted envelope */
 #define PC_STATE_HEADER	1		/* primary header */
 #define PC_STATE_BODY	2		/* other */
+
+off_t   start_offset = 0;
 
 #define STR	vstring_str
 #define LEN	VSTRING_LEN
@@ -175,9 +191,26 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 	    (rec_type == REC_TYPE_CONT || rec_type == REC_TYPE_NORM)
 
     /*
+     * Skip over or absorb some bytes.
+     */
+    if (start_offset > 0) {
+	if (fp == VSTREAM_IN) {
+	    for (offset = 0; offset < start_offset; offset++)
+		if (VSTREAM_GETC(fp) == VSTREAM_EOF)
+		    msg_fatal("%s: skip %ld bytes failed after %ld",
+			      VSTREAM_PATH(fp), (long) start_offset,
+			      (long) offset);
+	} else {
+	    if (vstream_fseek(fp, start_offset, SEEK_SET) < 0)
+		msg_fatal("%s: seek to %ld: %m",
+			  VSTREAM_PATH(fp), (long) start_offset);
+	}
+    }
+
+    /*
      * See if this is a plausible file.
      */
-    if ((ch = VSTREAM_GETC(fp)) != VSTREAM_EOF) {
+    if (start_offset == 0 && (ch = VSTREAM_GETC(fp)) != VSTREAM_EOF) {
 	if (!strchr(REC_TYPE_ENVELOPE, ch)) {
 	    msg_warn("%s: input is not a valid queue file", VSTREAM_PATH(fp));
 	    return;
@@ -188,7 +221,7 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
     /*
      * Other preliminaries.
      */
-    if (flags & PC_FLAG_PRINT_ENV)
+    if (start_offset == 0 && (flags & PC_FLAG_PRINT_ENV))
 	vstream_printf("*** ENVELOPE RECORDS %s ***\n",
 		       VSTREAM_PATH(fp));
     state = PC_STATE_ENV;
@@ -216,6 +249,8 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 	 * changed.
 	 */
 #define PRINT_MARKER(flags, fp, offset, type, text) do { \
+    if ((flags) & PC_FLAG_PRINT_PATHNAME) \
+	vstream_printf("%s: ", VSTREAM_PATH(fp)); \
     if ((flags) & PC_FLAG_PRINT_OFFSET) \
 	vstream_printf("%9lu ", (unsigned long) (offset)); \
     if (flags & PC_FLAG_PRINT_RTYPE_DEC) \
@@ -225,6 +260,8 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 } while (0)
 
 #define PRINT_RECORD(flags, offset, type, value) do { \
+    if ((flags) & PC_FLAG_PRINT_PATHNAME) \
+	vstream_printf("%s: ", VSTREAM_PATH(fp)); \
     if ((flags) & PC_FLAG_PRINT_OFFSET) \
 	vstream_printf("%9lu ", (unsigned long) (offset)); \
     if (flags & PC_FLAG_PRINT_RTYPE_DEC) \
@@ -246,7 +283,7 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 		    break;
 		/* Optimization: skip to extracted segment marker. */
 		if (do_print == 0 && (flags & PC_FLAG_PRINT_ENV)
-		    && data_offset >= 0 && data_size >= 0
+		    && data_offset > 0 && data_size >= 0
 		&& vstream_fseek(fp, data_offset + data_size, SEEK_SET) < 0)
 		    msg_fatal("seek error: %m");
 	    }
@@ -261,7 +298,7 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 		PRINT_MARKER(flags, fp, offset, rec_type, "MESSAGE CONTENTS");
 	    /* Optimization: skip to extracted segment marker. */
 	    if ((flags & PC_MASK_PRINT_TEXT) == 0
-		&& data_offset >= 0 && data_size >= 0
+		&& data_offset > 0 && data_size >= 0
 		&& vstream_fseek(fp, data_offset + data_size, SEEK_SET) < 0)
 		msg_fatal("seek error: %m");
 	    /* Update the state machine, even when skipping. */
@@ -293,6 +330,8 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 	    /* Optional output. */
 	    if (flags & PC_FLAG_PRINT_ENV)
 		PRINT_MARKER(flags, fp, offset, rec_type, "MESSAGE FILE END");
+	    if (flags & PC_FLAG_RAW)
+		continue;
 	    /* Terminate the state machine. */
 	    break;
 	} else if (rec_type == REC_TYPE_PTR) {
@@ -301,20 +340,25 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 	    if (do_print)
 		PRINT_RECORD(flags, offset, rec_type, STR(buffer));
 	    /* Skip to the pointer's target record. */
-	    if (rec_goto(fp, STR(buffer)) == REC_TYPE_ERROR)
+	    if ((flags & PC_FLAG_RAW) == 0
+		&& rec_goto(fp, STR(buffer)) == REC_TYPE_ERROR)
 		msg_fatal("bad pointer record, or input is not seekable");
 	    continue;
 	} else if (rec_type == REC_TYPE_SIZE) {
 	    /* Optional output (here before we update the state machine). */
 	    if (do_print)
 		PRINT_RECORD(flags, offset, rec_type, STR(buffer));
+	    /* Postfix 3.11 maildrop files may have preliminary SIZE record. */
+	    if (strncmp(VSTREAM_PATH(fp), MAIL_QUEUE_MAILDROP "/",
+			sizeof(MAIL_QUEUE_MAILDROP)) == 0)
+		continue;
 	    /* Read the message size/offset for the state machine optimizer. */
 	    if (data_size >= 0 || data_offset >= 0) {
 		msg_warn("file contains multiple size records");
 	    } else {
 		if (sscanf(STR(buffer), "%ld %ld", &data_size, &data_offset) != 2
 		    || data_offset <= 0 || data_size <= 0)
-		    msg_fatal("invalid size record: %.100s", STR(buffer));
+		    msg_warn("invalid size record: %.100s", STR(buffer));
 		/* Optimization: skip to the message header. */
 		if ((flags & PC_FLAG_PRINT_ENV) == 0) {
 		    if (vstream_fseek(fp, data_offset, SEEK_SET) < 0)
@@ -332,6 +376,8 @@ static void postcat(VSTREAM *fp, VSTRING *buffer, int flags)
 	 */
 	if (do_print == 0)
 	    continue;
+	if (flags & PC_FLAG_PRINT_PATHNAME)
+	    vstream_printf("%s: ", VSTREAM_PATH(fp));
 	if (flags & PC_FLAG_PRINT_OFFSET)
 	    vstream_printf("%9lu ", (unsigned long) offset);
 	if (flags & PC_FLAG_PRINT_RTYPE_DEC)
@@ -453,9 +499,14 @@ int     main(int argc, char **argv)
     msg_vstream_init(argv[0], VSTREAM_ERR);
 
     /*
+     * Check the Postfix library version as soon as we enable logging.
+     */
+    MAIL_VERSION_CHECK;
+
+    /*
      * Parse JCL.
      */
-    while ((ch = GETOPT(argc, argv, "bc:dehoqv")) > 0) {
+    while ((ch = GETOPT(argc, argv, "bc:defhoqrs:v")) > 0) {
 	switch (ch) {
 	case 'b':
 	    flags |= PC_FLAG_PRINT_BODY;
@@ -466,6 +517,9 @@ int     main(int argc, char **argv)
 	    break;
 	case 'd':
 	    flags |= PC_FLAG_PRINT_RTYPE_DEC;
+	    break;
+	case 'f':
+	    flags |= PC_FLAG_PRINT_PATHNAME;
 	    break;
 	case 'e':
 	    flags |= PC_FLAG_PRINT_ENV;
@@ -478,6 +532,13 @@ int     main(int argc, char **argv)
 	    break;
 	case 'q':
 	    flags |= PC_FLAG_SEARCH_QUEUE;
+	    break;
+	case 'r':
+	    flags |= PC_FLAG_RAW;
+	    break;
+	case 's':
+	    if (!alldig(optarg) || (start_offset = atol(optarg)) < 0)
+		msg_fatal("bad offset: %s", optarg);
 	    break;
 	case 'v':
 	    msg_verbose++;

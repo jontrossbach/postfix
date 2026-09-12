@@ -31,6 +31,13 @@
 #include <server_acl.h>
 
  /*
+  * TLS library.
+  */
+#ifdef USE_TLS
+#include <tls_proxy.h>
+#endif
+
+ /*
   * Preliminary stuff, to be fixed.
   */
 #define PSC_READ_BUF_SIZE	1024
@@ -73,6 +80,7 @@ typedef struct {
     int     smtp_server_fd;		/* real SMTP server */
     char   *smtp_client_addr;		/* client address */
     char   *smtp_client_port;		/* client port */
+    char   *smtp_client_addr_port;	/* [client_addr]:client_port */
     char   *smtp_server_addr;		/* server address */
     char   *smtp_server_port;		/* server port */
     const char *final_reply;		/* cause for hanging up */
@@ -113,10 +121,10 @@ typedef struct {
 #define PSC_STATE_FLAG_USING_TLS	(1<<1)	/* using the TLS proxy */
 #define PSC_STATE_FLAG_UNUSED2		(1<<2)	/* use me! */
 #define PSC_STATE_FLAG_NEW		(1<<3)	/* some test was never passed */
-#define PSC_STATE_FLAG_BLIST_FAIL	(1<<4)	/* blacklisted */
+#define PSC_STATE_FLAG_DNLIST_FAIL	(1<<4)	/* denylisted */
 #define PSC_STATE_FLAG_HANGUP		(1<<5)	/* NOT a test failure */
 #define PSC_STATE_FLAG_SMTPD_X21	(1<<6)	/* hang up after command */
-#define PSC_STATE_FLAG_WLIST_FAIL	(1<<7)	/* do not whitelist */
+#define PSC_STATE_FLAG_ALLIST_FAIL	(1<<7)	/* do not allowlist */
 #define PSC_STATE_FLAG_TEST_BASE	(8)	/* start of indexable flags */
 
  /*
@@ -156,7 +164,7 @@ typedef struct {
 #define PSC_STATE_FLAG_SHIFT_BYFNAME(fname) (PSC_STATE_FLAG_SHIFT_ ## fname)
 
  /*
-  * Indexable per-test flags. These are used for DNS whitelisting multiple
+  * Indexable per-test flags. These are used for DNS allowlisting multiple
   * tests, without needing per-test ad-hoc code.
   */
 #define PSC_STATE_FLAG_BYTINDX_FNAME(tindx, fname) \
@@ -267,9 +275,9 @@ typedef struct {
   * Super-aggregates for all tests combined.
   */
 #define PSC_STATE_MASK_ANY_FAIL \
-	(PSC_STATE_FLAG_BLIST_FAIL | \
+	(PSC_STATE_FLAG_DNLIST_FAIL | \
 	PSC_STATE_MASK_EARLY_FAIL | PSC_STATE_MASK_SMTPD_FAIL | \
-	PSC_STATE_FLAG_WLIST_FAIL)
+	PSC_STATE_FLAG_ALLIST_FAIL)
 
 #define PSC_STATE_MASK_ANY_PASS \
 	(PSC_STATE_MASK_EARLY_PASS | PSC_STATE_MASK_SMTPD_PASS)
@@ -410,6 +418,8 @@ extern HTABLE *psc_client_concurrency;	/* per-client concurrency */
 
  /*
   * postscreen_state.c
+  * 
+  * TODO(wietse): migrate PSC_CLIENT_ADDR_PORT to smtp_client_addr_port.
   */
 #define PSC_CLIENT_ADDR_PORT(state) \
 	(state)->smtp_client_addr, (state)->smtp_client_port
@@ -485,6 +495,7 @@ const char *psc_maps_find(MAPS *, const char *, int);
 extern void psc_dnsbl_init(void);
 extern int psc_dnsbl_retrieve(const char *, const char **, int, int *);
 extern int psc_dnsbl_request(const char *, void (*) (int, void *), void *);
+extern void psc_dnsbl_deinit(void);
 
  /*
   * postscreen_tests.c
@@ -555,6 +566,19 @@ extern void psc_send_socket(PSC_STATE *);
 extern void psc_starttls_open(PSC_STATE *, EVENT_NOTIFY_FN);
 
  /*
+  * postscreen_tls_conf.c.
+  */
+extern bool psc_tls_ready;
+extern bool psc_tls_pre_jail(void);
+
+#ifdef USE_TLS
+extern TLS_SERVER_PARAMS psc_tls_params;
+extern TLS_SERVER_INIT_PROPS psc_init_props;
+extern bool psc_tls_pre_start(const PSC_STATE *, TLS_SERVER_START_PROPS *);
+
+#endif
+
+ /*
   * postscreen_expand.c
   */
 extern VSTRING *psc_expand_filter;
@@ -573,9 +597,9 @@ extern void psc_endpt_local_lookup(VSTREAM *, PSC_ENDPT_LOOKUP_FN);
  /*
   * postscreen_access emulation.
   */
-#define PSC_ACL_ACT_WHITELIST	SERVER_ACL_ACT_PERMIT
+#define PSC_ACL_ACT_ALLOWLIST	SERVER_ACL_ACT_PERMIT
 #define PSC_ACL_ACT_DUNNO	SERVER_ACL_ACT_DUNNO
-#define PSC_ACL_ACT_BLACKLIST	SERVER_ACL_ACT_REJECT
+#define PSC_ACL_ACT_DENYLIST	SERVER_ACL_ACT_REJECT
 #define PSC_ACL_ACT_ERROR	SERVER_ACL_ACT_ERROR
 
 #define psc_acl_pre_jail_init	server_acl_pre_jail_init

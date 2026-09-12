@@ -8,7 +8,7 @@ show Postfix queue file contents
 .SH "SYNOPSIS"
 .na
 .nf
-\fBpostcat\fR [\fB\-bdehnoqv\fR] [\fB\-c \fIconfig_dir\fR] [\fIfiles\fR...]
+\fBpostcat\fR [\fB\-bdefhnoqv\fR] [\fB\-c \fIconfig_dir\fR] [\fIfiles\fR...]
 .SH DESCRIPTION
 .ad
 .fi
@@ -39,6 +39,10 @@ Print the decimal type of each record.
 Show message envelope content.
 .sp
 This feature is available in Postfix 2.7 and later.
+.IP \fB\-f\fR
+Prepend the file name to each output line.
+.sp
+This feature is available in Postfix 3.10 and later.
 .IP \fB\-h\fR
 Show message header content.  The \fB\-h\fR option produces
 output from the beginning of the message up to, but not
@@ -52,6 +56,14 @@ Search the Postfix queue for the named \fIfiles\fR instead
 of taking the names literally.
 
 This feature is available in Postfix 2.0 and later.
+.IP \fB\-r\fR
+Print records in file order, don't follow pointer records.
+
+This feature is available in Postfix 3.7 and later.
+.IP "\fB\-s \fIoffset\fR"
+Skip to the specified queue file offset.
+
+This feature is available in Postfix 3.7 and later.
 .IP \fB\-v\fR
 Enable verbose logging for debugging purposes. Multiple \fB\-v\fR
 options make the software increasingly verbose.
@@ -80,7 +92,7 @@ The text below provides only a parameter summary. See
 The default location of the Postfix main.cf and master.cf
 configuration files.
 .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-The list of environment parameters that a privileged Postfix
+The list of environment variables that a privileged Postfix
 process will import from a non\-Postfix parent process, or name=value
 environment overrides.
 .IP "\fBqueue_directory (see 'postconf -d' output)\fR"

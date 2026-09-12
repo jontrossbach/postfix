@@ -135,13 +135,13 @@
 /*	The external command to execute when a Postfix daemon program is
 /*	invoked with the -D option.
 /* .IP "\fBinet_interfaces (all)\fR"
-/*	The network interface addresses that this mail system receives
-/*	mail on.
-/* .IP "\fBinet_protocols (all)\fR"
+/*	The local network interface addresses that this mail system
+/*	receives mail on.
+/* .IP "\fBinet_protocols (see 'postconf -d' output)\fR"
 /*	The Internet protocols Postfix will attempt to use when making
 /*	or accepting connections.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBmail_owner (postfix)\fR"
@@ -162,6 +162,10 @@
 /*	Available in Postfix 3.3 and later:
 /* .IP "\fBservice_name (read-only)\fR"
 /*	The master.cf service name of a Postfix daemon process.
+/* .PP
+/*	Available in Postfix 3.6 and later:
+/* .IP "\fBknown_tcp_ports (lmtp=24, smtp=25, smtps=submissions=465, submission=587)\fR"
+/*	Optional setting that avoids lookups in the \fBservices\fR(5) database.
 /* FILES
 /* .ad
 /* .fi
@@ -420,8 +424,8 @@ int     main(int argc, char **argv)
 
     /*
      * If started from a terminal, get rid of any tty association. This also
-     * means that all errors and warnings must go to the syslog daemon.
-     * Some new world has no terminals and prefers logging to stdout.
+     * means that all errors and warnings must go to the syslog daemon. Some
+     * new world has no terminals and prefers logging to stdout.
      */
     if (master_detach)
 	for (fd = 0; fd < 3; fd++) {
@@ -496,7 +500,7 @@ int     main(int argc, char **argv)
     vstring_sprintf(lock_path, "%s/%s.pid", DEF_PID_DIR, var_procname);
     if (test_lock && access(vstring_str(lock_path), F_OK) < 0)
 	exit(0);
-    lock_fp = open_lock(vstring_str(lock_path), O_RDWR | O_CREAT, 0644, why);
+    lock_fp = open_lock(vstring_str(lock_path), O_RDWR | O_CREAT, 0600, why);
     if (test_lock)
 	exit(lock_fp ? 0 : 1);
     if (lock_fp == 0)
@@ -514,7 +518,7 @@ int     main(int argc, char **argv)
     vstring_sprintf(data_lock_path, "%s/%s.lock", var_data_dir, var_procname);
     set_eugid(var_owner_uid, var_owner_gid);
     data_lock_fp =
-	open_lock(vstring_str(data_lock_path), O_RDWR | O_CREAT, 0644, why);
+	open_lock(vstring_str(data_lock_path), O_RDWR | O_CREAT, 0600, why);
     set_ugid(getuid(), getgid());
     if (data_lock_fp == 0)
 	msg_fatal("open lock file %s: %s",

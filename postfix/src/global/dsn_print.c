@@ -16,7 +16,7 @@
 /*	the specified attribute print routine. dsn_print() is meant
 /*	to be passed as a call-back to attr_print(), thusly:
 /*
-/*	... SEND_ATTR_FUNC(dsn_print, (void *) dsn), ...
+/*	... SEND_ATTR_FUNC(dsn_print, (const void *) dsn), ...
 /* DIAGNOSTICS
 /*	Fatal: out of memory.
 /* LICENSE
@@ -28,6 +28,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
@@ -46,7 +51,7 @@
 /* dsn_print - write DSN to stream */
 
 int     dsn_print(ATTR_PRINT_COMMON_FN print_fn, VSTREAM *fp,
-		          int flags, void *ptr)
+		          int flags, const void *ptr)
 {
     DSN    *dsn = (DSN *) ptr;
     int     ret;

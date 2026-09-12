@@ -6,12 +6,13 @@
 /* SYNOPSIS
 /*	#include <verify.h>
 /*
-/*	int	verify_append(queue_id, stats, recipient, relay, dsn,
+/*	int	verify_append(queue_id, stats, recipient, relay, tstats, dsn,
 /*				verify_status)
 /*	const char *queue_id;
 /*	MSG_STATS *stats;
 /*	RECIPIENT *recipient;
 /*	const char *relay;
+/*	const POL_STATS *tstats;
 /*	DSN	*dsn;
 /*	int	verify_status;
 /* DESCRIPTION
@@ -32,6 +33,8 @@
 /*	Recipient information. See recipient_list(3).
 /* .IP relay
 /*	Name of the host we're talking to.
+/* .IP tstats
+/*	TLS per-feature status.
 /* .IP dsn
 /*	Delivery status information. See dsn(3).
 /*	The action is one of "deliverable" or "undeliverable".
@@ -66,6 +69,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -91,7 +97,8 @@
 
 int     verify_append(const char *queue_id, MSG_STATS *stats,
 		              RECIPIENT *recipient, const char *relay,
-		              DSN *dsn, int vrfy_stat)
+		              const POL_STATS *tstats, DSN *dsn,
+		              int vrfy_stat)
 {
     int     req_stat;
     DSN     my_dsn = *dsn;
@@ -102,12 +109,14 @@ int     verify_append(const char *queue_id, MSG_STATS *stats,
      * XXX No DSN check; this routine is called from bounce/defer/sent, which
      * know what the DSN initial digit should look like.
      * 
-     * XXX vrfy_stat is competely redundant because of dsn.
+     * XXX vrfy_stat is completely redundant because of dsn.
      */
     if (var_verify_neg_cache || vrfy_stat == DEL_RCPT_STAT_OK) {
 	if (recipient->orig_addr[0])
 	    req_stat = verify_clnt_update(recipient->orig_addr, vrfy_stat,
 					  my_dsn.reason);
+	else
+	    req_stat = VRFY_STAT_OK;
 	/* Two verify updates for one verify request! */
 	if (req_stat == VRFY_STAT_OK
 	    && strcmp(recipient->address, recipient->orig_addr) != 0)
@@ -118,7 +127,8 @@ int     verify_append(const char *queue_id, MSG_STATS *stats,
 	req_stat = VRFY_STAT_OK;
     }
     if (req_stat == VRFY_STAT_OK) {
-	log_adhoc(queue_id, stats, recipient, relay, dsn, my_dsn.action);
+	log_adhoc(queue_id, stats, recipient, relay, tstats, dsn,
+		  my_dsn.action);
 	req_stat = 0;
     } else {
 	msg_warn("%s: %s service failure", queue_id, var_verify_service);

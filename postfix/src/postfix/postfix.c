@@ -37,11 +37,15 @@
 /*	when running as PID 1.
 /*	This command requires that multi-instance support is
 /*	disabled (i.e. the multi_instance_directories parameter
-/*	value must be empty). When running Postfix inside a container,
-/*	mount the container host's /dev/log socket inside the
-/*	container (example: "docker run -v /dev/log:/dev/log ...")
-/*	and specify a distinct Postfix "syslog_name" prefix that
-/*	identifies logging from the Postfix instance.
+/*	value must be empty).
+/*
+/*	When running Postfix inside a container, see MAILLOG_README
+/*	for logging to stdout. Postfix logs to syslog by default,
+/*	which requires a) running a syslogd process inside the
+/*	container, or b) mounting the container host's /dev/log
+/*	socket inside the container (example: "docker run -v
+/*	/dev/log:/dev/log ..."), and c) a distinct Postfix "syslog_name"
+/*	prefix that identifies logging from the Postfix instance.
 /* .IP \fBstop\fR
 /*	Stop the Postfix mail system in an orderly fashion. If
 /*	possible, running processes are allowed to terminate at
@@ -64,7 +68,8 @@
 /*	Re-read configuration files. Running processes terminate at their
 /*	earliest convenience.
 /* .IP \fBstatus\fR
-/*	Indicate if the Postfix mail system is currently running.
+/*	Indicate if the Postfix mail system is currently running
+/*	(zero exit status) or stopped (non-zero exit status).
 /* .IP "\fBset-permissions\fR [\fIname\fR=\fIvalue ...\fR]"
 /*	Set the ownership and permissions of Postfix related files and
 /*	directories, as specified in the \fBpostfix-files\fR file.
@@ -84,7 +89,14 @@
 /*	with the command specified with $maillog_file_compressor.
 /*	This will not rotate /dev/* files.
 /* .sp
-/*	This feature is available in Postfix 3.4 and later.
+/* .IP "\fBnon-bdb\fR \fIsubcommand\fR"
+/*	Migrate a Postfix configuration that uses Berkeley DB hash:
+/*	or btree: tables, to a configuration that uses lmdb: or a
+/*	combination of cdb: and lmdb:. This is needed because some
+/*	(Linux) distributions have removed Berkeley DB support.
+/*	See postfix-nbdb(1) for documentation.
+/* .sp
+/*	This feature is available in Postfix 3.11 and later.
 /* .IP "\fBtls\fR \fIsubcommand\fR"
 /*	Enable opportunistic TLS in the Postfix SMTP client or
 /*	server, and manage Postfix SMTP server TLS private keys and
@@ -189,6 +201,9 @@
 /*	caches, pseudo-random numbers).
 /* .PP
 /*	Available in Postfix version 3.0 and later:
+/* .IP "\fBcompatibility_level (0)\fR"
+/*	A safety net that causes Postfix to run with backwards-compatible
+/*	default settings after an upgrade to a newer Postfix version.
 /* .IP "\fBmeta_directory (see 'postconf -d' output)\fR"
 /*	The location of non-executable files that are shared among
 /*	multiple Postfix instances, such as postfix-files, dynamicmaps.cf,
@@ -205,7 +220,7 @@
 /* .PP
 /*	Other configuration parameters:
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* .IP "\fBsyslog_facility (mail)\fR"
@@ -252,8 +267,9 @@
 /* .fi
 /*	Prior to Postfix version 2.6, all of the following files
 /*	were in \fB$config_directory\fR. Some files are now in
-/*	\fB$daemon_directory\fR so that they can be shared among
-/*	multiple instances that run the same Postfix version.
+/*	\fB$daemon_directory\fR or \fB$meta_directory\fR so that they
+/*	can be shared among multiple instances that run the same Postfix
+/*	version.
 /*
 /*	Use the command "\fBpostconf config_directory\fR" or
 /*	"\fBpostconf daemon_directory\fR" to expand the names
@@ -263,16 +279,18 @@
 /*
 /*	$config_directory/main.cf, Postfix configuration parameters
 /*	$config_directory/master.cf, Postfix daemon processes
-/*	$daemon_directory/postfix-files, file/directory permissions
 /*	$daemon_directory/postfix-script, administrative commands
 /*	$daemon_directory/post-install, post-installation configuration
-/*	$daemon_directory/dynamicmaps.cf, plug-in database clients
+/*	$meta_directory/dynamicmaps.cf, plug-in database clients
+/*	$meta_directory/postfix-files, file/directory permissions
 /* SEE ALSO
 /*	Commands:
 /*	postalias(1), create/update/query alias database
 /*	postcat(1), examine Postfix queue file
 /*	postconf(1), Postfix configuration utility
+/*	postdrop(1), Postfix mail posting utility
 /*	postfix(1), Postfix control program
+/*	postfix-non-bdb(1), Postfix Non-Berkeley-DB migration
 /*	postfix-tls(1), Postfix TLS management
 /*	postkick(1), trigger Postfix daemon
 /*	postlock(1), Postfix-compatible locking
@@ -293,7 +311,7 @@
 /*
 /*	Table-driven mechanisms:
 /*	access(5), Postfix SMTP access control table
-/*	aliases(5), Postfix alias database
+/*	aliases(5), Postfix local aliasing
 /*	canonical(5), Postfix input address rewriting
 /*	generic(5), Postfix output address rewriting
 /*	header_checks(5), body_checks(5), Postfix content inspection
@@ -306,6 +324,7 @@
 /*	ldap_table(5), Postfix LDAP client
 /*	lmdb_table(5), Postfix LMDB database driver
 /*	memcache_table(5), Postfix memcache client
+/*	mongodb_table(5), Postfix MongoDB client
 /*	mysql_table(5), Postfix MYSQL client
 /*	nisplus_table(5), Postfix NIS+ client
 /*	pcre_table(5), Associate PCRE pattern with value
@@ -320,7 +339,7 @@
 /*	bounce(8), defer(8), trace(8), Delivery status reports
 /*	cleanup(8), canonicalize and enqueue message
 /*	discard(8), Postfix discard delivery agent
-/*	dnsblog(8), DNS black/whitelist logger
+/*	dnsblog(8), DNS allow/denylist logger
 /*	error(8), Postfix error delivery agent
 /*	flush(8), Postfix fast ETRN service
 /*	local(8), Postfix local delivery agent
@@ -421,6 +440,7 @@
 
 #include <msg.h>
 #include <msg_vstream.h>
+#include <mymalloc.h>
 #include <stringops.h>
 #include <clean_env.h>
 #include <argv.h>
@@ -434,6 +454,7 @@
 #include <mail_version.h>
 #include <mail_parm_split.h>
 #include <maillog_client.h>
+#include <compat_level.h>
 
 /* Additional installation parameters. */
 
@@ -506,9 +527,9 @@ int     main(int argc, char **argv)
      */
     if ((slash = strrchr(argv[0], '/')) != 0 && slash[1])
 	argv[0] = slash + 1;
-    if (isatty(STDERR_FILENO))
-	msg_vstream_init(argv[0], VSTREAM_ERR);
+    msg_vstream_init(argv[0], VSTREAM_ERR);
     maillog_client_init(argv[0], MAILLOG_CLIENT_FLAG_LOGWRITER_FALLBACK);
+    set_mail_conf_str(VAR_PROCNAME, var_procname = mystrdup(argv[0]));
 
     /*
      * Check the Postfix library version as soon as we enable logging.
@@ -579,14 +600,13 @@ int     main(int argc, char **argv)
      * Alert the sysadmin that the backwards-compatible settings are still in
      * effect.
      */
-    if (var_compat_level < CUR_COMPAT_LEVEL) {
-	msg_info("Postfix is running with backwards-compatible default "
-		 "settings");
-	msg_info("See http://www.postfix.org/COMPATIBILITY_README.html "
+    if (compat_level < compat_level_from_string(LAST_COMPAT_LEVEL, msg_panic)) {
+	msg_info("Postfix is using backwards-compatible default settings");
+	msg_info("See https://www.postfix.org/COMPATIBILITY_README.html "
 		 "for details");
 	msg_info("To disable backwards compatibility use \"postconf "
-		 VAR_COMPAT_LEVEL "=%d\" and \"postfix reload\"",
-		 CUR_COMPAT_LEVEL);
+		 VAR_COMPAT_LEVEL "=%s\" and \"postfix reload\"",
+		 LAST_COMPAT_LEVEL);
     }
     check_setenv("PATH", ROOT_PATH);		/* sys_defs.h */
     check_setenv(CONF_ENV_PATH, var_config_dir);/* mail_conf.h */

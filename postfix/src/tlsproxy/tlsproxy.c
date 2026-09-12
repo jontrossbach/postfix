@@ -8,8 +8,8 @@
 /* DESCRIPTION
 /*	The \fBtlsproxy\fR(8) server implements a two-way TLS proxy. It
 /*	is used by the \fBpostscreen\fR(8) server to talk SMTP-over-TLS
-/*	with remote SMTP clients that are not whitelisted (including
-/*	clients whose whitelist status has expired), and by the
+/*	with remote SMTP clients that are not allowlisted (including
+/*	clients whose allowlist status has expired), and by the
 /*	\fBsmtp\fR(8) client to support TLS connection reuse, but it
 /*	should also work for non-SMTP protocols.
 /*
@@ -74,10 +74,6 @@
 /*	The OpenSSL cipherlist for "high" grade ciphers.
 /* .IP "\fBtls_medium_cipherlist (see 'postconf -d' output)\fR"
 /*	The OpenSSL cipherlist for "medium" or higher grade ciphers.
-/* .IP "\fBtls_low_cipherlist (see 'postconf -d' output)\fR"
-/*	The OpenSSL cipherlist for "low" or higher grade ciphers.
-/* .IP "\fBtls_export_cipherlist (see 'postconf -d' output)\fR"
-/*	The OpenSSL cipherlist for "export" or higher grade ciphers.
 /* .IP "\fBtls_null_cipherlist (eNULL:!aNULL)\fR"
 /*	The OpenSSL cipherlist for "NULL" grade ciphers that provide
 /*	authentication without encryption.
@@ -95,6 +91,12 @@
 /*	With SSLv3 and later, use the Postfix SMTP server's cipher
 /*	preference order instead of the remote client's cipher preference
 /*	order.
+/* .PP
+/*	Available in Postfix version 2.8..3.7:
+/* .IP "\fBtls_low_cipherlist (see 'postconf -d' output)\fR"
+/*	The OpenSSL cipherlist for "low" or higher grade ciphers.
+/* .IP "\fBtls_export_cipherlist (see 'postconf -d' output)\fR"
+/*	The OpenSSL cipherlist for "export" or higher grade ciphers.
 /* .PP
 /*	Available in Postfix version 2.9 and later:
 /* .IP "\fBtls_legacy_public_key_fingerprints (no)\fR"
@@ -121,8 +123,8 @@
 /* .PP
 /*	Available in Postfix version 3.2 and later:
 /* .IP "\fBtls_eecdh_auto_curves (see 'postconf -d' output)\fR"
-/*	The prioritized list of elliptic curves supported by the Postfix
-/*	SMTP client and server.
+/*	The prioritized list of elliptic curves, that should be enabled in the
+/*	Postfix SMTP client and server.
 /* .PP
 /*	Available in Postfix version 3.4 and later:
 /* .IP "\fBtls_server_sni_maps (empty)\fR"
@@ -134,6 +136,19 @@
 /* .IP "\fBtls_fast_shutdown_enable (yes)\fR"
 /*	A workaround for implementations that hang Postfix while shutting
 /*	down a TLS session, until Postfix times out.
+/* .PP
+/*	Available in Postfix version 3.8 and later:
+/* .IP "\fBtls_ffdhe_auto_groups (see 'postconf -d' output)\fR"
+/*	The prioritized list of finite-field Diffie-Hellman ephemeral
+/*	(FFDHE) key exchange groups supported by the Postfix SMTP client and
+/*	server.
+/* .PP
+/*	Available in Postfix 3.9, 3.8.1, 3.7.6, 3.6.10, 3.5.20 and later:
+/* .IP "\fBtls_config_file (default)\fR"
+/*	Optional configuration file with baseline OpenSSL settings.
+/* .IP "\fBtls_config_name (empty)\fR"
+/*	The application name passed by Postfix to OpenSSL library
+/*	initialization functions.
 /* STARTTLS SERVER CONTROLS
 /* .ad
 /* .fi
@@ -222,6 +237,12 @@
 /* .IP "\fBtlsproxy_tls_chain_files ($smtpd_tls_chain_files)\fR"
 /*	Files with the Postfix \fBtlsproxy\fR(8) server keys and certificate
 /*	chains in PEM format.
+/* .PP
+/*	Available in Postfix version 3.9 and later:
+/* .IP "\fBtlsproxy_tls_enable_rpk ($smtpd_tls_enable_rpk)\fR"
+/*	Request that remote SMTP clients send an RFC7250 raw public key
+/*	instead of an X.509 certificate, when asking or requiring client
+/*	authentication.
 /* STARTTLS CLIENT CONTROLS
 /* .ad
 /* .fi
@@ -267,17 +288,8 @@
 /* .IP "\fBtlsproxy_client_loglevel ($smtp_tls_loglevel)\fR"
 /*	Enable additional Postfix \fBtlsproxy\fR(8) client logging of TLS
 /*	activity.
-/* .IP "\fBtlsproxy_client_loglevel_parameter (smtp_tls_loglevel)\fR"
-/*	The name of the parameter that provides the tlsproxy_client_loglevel
-/*	value.
 /* .IP "\fBtlsproxy_client_scert_verifydepth ($smtp_tls_scert_verifydepth)\fR"
 /*	The verification depth for remote TLS server certificates.
-/* .IP "\fBtlsproxy_client_security_level ($smtp_tls_security_level)\fR"
-/*	The default TLS security level for the Postfix \fBtlsproxy\fR(8)
-/*	client.
-/* .IP "\fBtlsproxy_client_policy_maps ($smtp_tls_policy_maps)\fR"
-/*	Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
-/*	security policy by next-hop destination.
 /* .IP "\fBtlsproxy_client_use_tls ($smtp_use_tls)\fR"
 /*	Opportunistic mode: use TLS when a remote server announces TLS
 /*	support.
@@ -287,6 +299,22 @@
 /*	Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
 /*	usage policy by next-hop destination and by remote TLS server
 /*	hostname.
+/* .PP
+/*	Available in Postfix version 3.4-3.6:
+/* .IP "\fBtlsproxy_client_level ($smtp_tls_security_level)\fR"
+/*	The default TLS security level for the Postfix \fBtlsproxy\fR(8)
+/*	client.
+/* .IP "\fBtlsproxy_client_policy ($smtp_tls_policy_maps)\fR"
+/*	Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
+/*	security policy by next-hop destination.
+/* .PP
+/*	Available in Postfix version 3.7 and later:
+/* .IP "\fBtlsproxy_client_security_level ($smtp_tls_security_level)\fR"
+/*	The default TLS security level for the Postfix \fBtlsproxy\fR(8)
+/*	client.
+/* .IP "\fBtlsproxy_client_policy_maps ($smtp_tls_policy_maps)\fR"
+/*	Optional lookup tables with the Postfix \fBtlsproxy\fR(8) client TLS
+/*	security policy by next-hop destination.
 /* OBSOLETE STARTTLS SUPPORT CONTROLS
 /* .ad
 /* .fi
@@ -298,6 +326,11 @@
 /* .IP "\fBtlsproxy_enforce_tls ($smtpd_enforce_tls)\fR"
 /*	Mandatory TLS: announce STARTTLS support to remote SMTP clients, and
 /*	require that clients use TLS encryption.
+/* .IP "\fBtlsproxy_client_use_tls ($smtp_use_tls)\fR"
+/*	Opportunistic mode: use TLS when a remote server announces TLS
+/*	support.
+/* .IP "\fBtlsproxy_client_enforce_tls ($smtp_enforce_tls)\fR"
+/*	Enforcement mode: require that SMTP servers use TLS encryption.
 /* RESOURCE CONTROLS
 /* .ad
 /* .fi
@@ -347,6 +380,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
  /*
@@ -390,11 +426,14 @@
 #define TLS_INTERNAL			/* XXX */
 #include <tls.h>
 #include <tls_proxy.h>
+#include <tlsrpt_wrapper.h>
 
  /*
   * Application-specific.
   */
 #include <tlsproxy.h>
+#include <tlsproxy_client.h>
+#include <tlsproxy_server.h>
 
  /*
   * Tunable parameters. We define our clones of the smtpd(8) parameters to
@@ -406,6 +445,7 @@ bool    var_smtpd_use_tls;
 bool    var_smtpd_enforce_tls;
 bool    var_smtpd_tls_ask_ccert;
 bool    var_smtpd_tls_req_ccert;
+bool    var_smtpd_tls_enable_rpk;
 bool    var_smtpd_tls_set_sessid;
 char   *var_smtpd_relay_ccerts;
 char   *var_smtpd_tls_chain_files;
@@ -435,6 +475,7 @@ bool    var_tlsp_use_tls;
 bool    var_tlsp_enforce_tls;
 bool    var_tlsp_tls_ask_ccert;
 bool    var_tlsp_tls_req_ccert;
+bool    var_tlsp_tls_enable_rpk;
 bool    var_tlsp_tls_set_sessid;
 char   *var_tlsp_tls_chain_files;
 char   *var_tlsp_tls_cert_file;
@@ -500,37 +541,10 @@ char   *var_tlsp_clnt_per_site;
 char   *var_tlsp_clnt_policy;
 
  /*
-  * TLS per-process status.
+  * TODO(wietse): simplify role state management.
   */
-static TLS_APPL_STATE *tlsp_server_ctx;
-static bool tlsp_pre_jail_done;
-static int ask_client_cert;
-static char *tlsp_pre_jail_client_param_key;	/* pre-jail global params */
-static char *tlsp_pre_jail_client_init_key;	/* pre-jail init props */
-
- /*
-  * TLS per-client status.
-  */
-static HTABLE *tlsp_client_app_cache;	/* per-client init props */
-static BH_TABLE *tlsp_params_mismatch_filter;	/* per-client nag filter */
-
- /*
-  * Error handling: if a function detects an error, then that function is
-  * responsible for destroying TLSP_STATE. Exceptions to this principle are
-  * indicated in the code.
-  */
-
- /*
-  * Internal status API.
-  */
-#define TLSP_STAT_OK	0
-#define TLSP_STAT_ERR	(-1)
-
- /*
-  * SLMs.
-  */
-#define STR(x)	vstring_str(x)
-#define LEN(x)	VSTRING_LEN(x)
+static bool tlsp_server_role_ready;
+static bool tlsp_client_role_ready;
 
  /*
   * The code that implements the TLS engine looks simpler than expected. That
@@ -693,6 +707,20 @@ static int tlsp_eval_tls_error(TLSP_STATE *state, int err)
 	    state->flags |= TLSP_FLAG_NO_MORE_CIPHERTEXT_IO;
 	    return (TLSP_STAT_OK);
 	}
+
+	/*
+	 * Report a generic failure only if a more specific failure wasn't
+	 * already reported.
+	 */
+#ifdef USE_TLSRPT
+	if (state->is_server_role == 0
+	    && (state->flags & TLSP_FLAG_DO_HANDSHAKE)
+	    && state->client_start_props->tlsrpt)
+	    trw_report_failure(state->client_start_props->tlsrpt,
+			       TLSRPT_VALIDATION_FAILURE,
+			        /* additional_info= */ (char *) 0,
+			       "tls-handshake-failure");
+#endif
 	tlsp_state_free(state);
 	return (TLSP_STAT_ERR);
     }
@@ -923,7 +951,7 @@ static void tlsp_strategy(TLSP_STATE *state)
      * block. In practice, postscreen(8) limits the number of client
      * commands, and thus postscreen(8)'s output will fit in a kernel buffer.
      * A remote SMTP server is not supposed to flood the local SMTP client
-     * with massive replies; it it does, then the local SMTP client should
+     * with massive replies; if it does, then the local SMTP client should
      * deal with it.
      */
     if (NBBIO_WRITE_PEND(plaintext_buf) > 0) {
@@ -971,7 +999,7 @@ static void tlsp_ciphertext_event(int event, void *context)
     TLSP_STATE *state = (TLSP_STATE *) context;
 
     /*
-     * Without a TLS quivalent of the NBBIO layer, we must decode the events
+     * Without a TLS equivalent of the NBBIO layer, we must decode the events
      * ourselves and do the ciphertext I/O. Then, we can decide if we want to
      * read or write more ciphertext.
      */
@@ -988,88 +1016,6 @@ static void tlsp_ciphertext_event(int event, void *context)
 		     state->remote_endpt);
 	tlsp_state_free(state);
     }
-}
-
-/* tlsp_client_start_pre_handshake - turn on TLS or force disconnect */
-
-static int tlsp_client_start_pre_handshake(TLSP_STATE *state)
-{
-    state->client_start_props->ctx = state->appl_state;
-    state->client_start_props->fd = state->ciphertext_fd;
-    state->tls_context = tls_client_start(state->client_start_props);
-    if (state->tls_context != 0)
-	return (TLSP_STAT_OK);
-
-    tlsp_state_free(state);
-    return (TLSP_STAT_ERR);
-}
-
-/* tlsp_server_start_pre_handshake - turn on TLS or force disconnect */
-
-static int tlsp_server_start_pre_handshake(TLSP_STATE *state)
-{
-    TLS_SERVER_START_PROPS props;
-    static char *cipher_grade;
-    static VSTRING *cipher_exclusions;
-
-    /*
-     * The code in this routine is pasted literally from smtpd(8). I am not
-     * going to sanitize this because doing so surely will break things in
-     * unexpected ways.
-     */
-
-    /*
-     * Perform the before-handshake portion of per-session initialization.
-     * Pass a null VSTREAM to indicate that this program will do the
-     * ciphertext I/O, not libtls.
-     * 
-     * The cipher grade and exclusions don't change between sessions. Compute
-     * just once and cache.
-     */
-#define ADD_EXCLUDE(vstr, str) \
-    do { \
-	if (*(str)) \
-	    vstring_sprintf_append((vstr), "%s%s", \
-				   VSTRING_LEN(vstr) ? " " : "", (str)); \
-    } while (0)
-
-    if (cipher_grade == 0) {
-	cipher_grade =
-	    var_tlsp_enforce_tls ? var_tlsp_tls_mand_ciph : var_tlsp_tls_ciph;
-	cipher_exclusions = vstring_alloc(10);
-	ADD_EXCLUDE(cipher_exclusions, var_tlsp_tls_excl_ciph);
-	if (var_tlsp_enforce_tls)
-	    ADD_EXCLUDE(cipher_exclusions, var_tlsp_tls_mand_excl);
-	if (ask_client_cert)
-	    ADD_EXCLUDE(cipher_exclusions, "aNULL");
-    }
-    state->tls_context =
-	TLS_SERVER_START(&props,
-			 ctx = tlsp_server_ctx,
-			 stream = (VSTREAM *) 0,/* unused */
-			 fd = state->ciphertext_fd,
-			 timeout = 0,		/* unused */
-			 requirecert = (var_tlsp_tls_req_ccert
-					&& var_tlsp_enforce_tls),
-			 serverid = state->server_id,
-			 namaddr = state->remote_endpt,
-			 cipher_grade = cipher_grade,
-			 cipher_exclusions = STR(cipher_exclusions),
-			 mdalg = var_tlsp_tls_fpt_dgst);
-
-    if (state->tls_context == 0) {
-	tlsp_state_free(state);
-	return (TLSP_STAT_ERR);
-    }
-
-    /*
-     * XXX Do we care about TLS session rate limits? Good postscreen(8)
-     * clients will occasionally require the tlsproxy to renew their
-     * whitelist status, but bad clients hammering the server can suck up
-     * lots of CPU cycles. Per-client concurrency limits in postscreen(8)
-     * will divert only naive security "researchers".
-     */
-    return (TLSP_STAT_OK);
 }
 
  /*
@@ -1149,180 +1095,6 @@ static void tlsp_get_fd_event(int event, void *context)
     /* At this point, state could be a dangling pointer. */
 }
 
-/* tlsp_config_diff - report server-client config differences */
-
-static void tlsp_log_config_diff(const char *server_cfg, const char *client_cfg)
-{
-    VSTRING *diff_summary = vstring_alloc(100);
-    char   *saved_server = mystrdup(server_cfg);
-    char   *saved_client = mystrdup(client_cfg);
-    char   *server_field;
-    char   *client_field;
-    char   *server_next;
-    char   *client_next;
-
-    /*
-     * Not using argv_split(), because it would treat multiple consecutive
-     * newline characters as one.
-     */
-    for (server_field = saved_server, client_field = saved_client;
-	 server_field && client_field;
-	 server_field = server_next, client_field = client_next) {
-	server_next = split_at(server_field, '\n');
-	client_next = split_at(client_field, '\n');
-	if (strcmp(server_field, client_field) != 0) {
-	    if (LEN(diff_summary) > 0)
-		vstring_sprintf_append(diff_summary, "; ");
-	    vstring_sprintf_append(diff_summary,
-				   "(server) '%s' != (client) '%s'",
-				   server_field, client_field);
-	}
-    }
-    msg_warn("%s", STR(diff_summary));
-
-    vstring_free(diff_summary);
-    myfree(saved_client);
-    myfree(saved_server);
-}
-
-/* tlsp_client_init - initialize a TLS client engine */
-
-static TLS_APPL_STATE *tlsp_client_init(TLS_CLIENT_PARAMS *tls_params,
-				          TLS_CLIENT_INIT_PROPS *init_props)
-{
-    TLS_APPL_STATE *appl_state;
-    VSTRING *param_buf;
-    char   *param_key;
-    VSTRING *init_buf;
-    char   *init_key;
-    VSTRING *init_buf_for_hashing;
-    char   *init_key_for_hashing;
-    int     log_hints = 0;
-
-    /*
-     * Use one TLS_APPL_STATE object for all requests that specify the same
-     * TLS_CLIENT_INIT_PROPS. Each TLS_APPL_STATE owns an SSL_CTX, which is
-     * expensive to create. Bug: TLS_CLIENT_PARAMS are not used when creating
-     * a TLS_APPL_STATE instance.
-     * 
-     * First, compute the TLS_APPL_STATE cache lookup key. Save a copy of the
-     * pre-jail request TLS_CLIENT_PARAMS and TLSPROXY_CLIENT_INIT_PROPS
-     * settings, so that we can detect post-jail requests that do not match.
-     * 
-     * Workaround: salt the hash-table key with DANE on/off info. This avoids
-     * cross-talk between DANE and non-DANE sessions. Postfix DANE support
-     * modifies SSL_CTX to override certificate verification because there is
-     * no other way to do this before OpenSSL 1.1.0.
-     */
-    param_buf = vstring_alloc(100);
-    param_key = tls_proxy_client_param_with_names_to_string(
-						     param_buf, tls_params);
-    init_buf = vstring_alloc(100);
-    init_key = tls_proxy_client_init_with_names_to_string(
-						      init_buf, init_props);
-    init_buf_for_hashing = vstring_alloc(100);
-    init_key_for_hashing = STR(vstring_sprintf(init_buf_for_hashing, "%s\n",
-					       init_key));
-    if (tlsp_pre_jail_done == 0) {
-	if (tlsp_pre_jail_client_param_key == 0
-	    || tlsp_pre_jail_client_init_key == 0) {
-	    tlsp_pre_jail_client_param_key = mystrdup(param_key);
-	    tlsp_pre_jail_client_init_key = mystrdup(init_key);
-	} else if (strcmp(tlsp_pre_jail_client_param_key, param_key) != 0
-		   || strcmp(tlsp_pre_jail_client_init_key, init_key) != 0) {
-	    msg_panic("tlsp_client_init: too many pre-jail calls");
-	}
-    }
-
-    /*
-     * Log a warning if a post-jail request uses unexpected TLS_CLIENT_PARAMS
-     * settings. Bug: TLS_CLIENT_PARAMS settings are not used when creating a
-     * TLS_APPL_STATE instance; this makes a mismatch of TLS_CLIENT_PARAMS
-     * settings problematic.
-     */
-    if (tlsp_pre_jail_done
-	&& !been_here_fixed(tlsp_params_mismatch_filter, param_key)
-	&& strcmp(tlsp_pre_jail_client_param_key, param_key) != 0) {
-	msg_warn("request from tlsproxy client with unexpected settings");
-	tlsp_log_config_diff(tlsp_pre_jail_client_param_key, param_key);
-	log_hints = 1;
-    }
-
-    /*
-     * Look up the cached TLS_APPL_STATE for this tls_client_init request.
-     */
-    if ((appl_state = (TLS_APPL_STATE *)
-	 htable_find(tlsp_client_app_cache, init_key_for_hashing)) == 0) {
-
-	/*
-	 * Before creating a TLS_APPL_STATE instance, log a warning if a
-	 * post-jail request differs from the saved pre-jail request AND the
-	 * post-jail request specifies file/directory pathname arguments.
-	 * Unexpected requests containing pathnames are problematic after
-	 * chroot (pathname resolution) and after dropping privileges (key
-	 * files must be root read-only). Unexpected requests are not a
-	 * problem as long as they contain no pathnames (for example a
-	 * tls_loglevel change).
-	 * 
-	 * We could eliminate some of this complication by adding code that
-	 * opens a cert/key lookup table at pre-jail time, and by reading
-	 * cert/key info on-the-fly from that table. But then all requests
-	 * would still have to specify the same table.
-	 */
-#define NOT_EMPTY(x) ((x) && *(x))
-
-	if (tlsp_pre_jail_done
-	    && strcmp(tlsp_pre_jail_client_init_key, init_key) != 0
-	    && (NOT_EMPTY(init_props->chain_files)
-		|| NOT_EMPTY(init_props->cert_file)
-		|| NOT_EMPTY(init_props->key_file)
-		|| NOT_EMPTY(init_props->dcert_file)
-		|| NOT_EMPTY(init_props->dkey_file)
-		|| NOT_EMPTY(init_props->eccert_file)
-		|| NOT_EMPTY(init_props->eckey_file)
-		|| NOT_EMPTY(init_props->CAfile)
-		|| NOT_EMPTY(init_props->CApath))) {
-	    msg_warn("request from tlsproxy client with unexpected settings");
-	    tlsp_log_config_diff(tlsp_pre_jail_client_init_key, init_key);
-	    log_hints = 1;
-	}
-    }
-    if (log_hints)
-	msg_warn("to avoid this warning, 1) identify the tlsproxy "
-		 "client that is making this request, 2) configure "
-		 "a custom tlsproxy service with settings that "
-		 "match that tlsproxy client, and 3) configure "
-		 "that tlsproxy client with a tlsproxy_service_name "
-		 "setting that resolves to that custom tlsproxy "
-		 "service");
-
-    /*
-     * TLS_APPL_STATE creation may fail when a post-jail request specifies
-     * unexpected cert/key information, but that is OK because we already
-     * logged a warning with configuration suggestions.
-     */
-    if (appl_state == 0
-	&& (appl_state = tls_client_init(init_props)) != 0) {
-	(void) htable_enter(tlsp_client_app_cache, init_key_for_hashing,
-			    (void *) appl_state);
-
-	/*
-	 * To maintain sanity, allow partial SSL_write() operations, and
-	 * allow SSL_write() buffer pointers to change after a WANT_READ or
-	 * WANT_WRITE result. This is based on OpenSSL developers talking on
-	 * a mailing list, but is not supported by documentation. If this
-	 * code stops working then no-one can be held responsible.
-	 */
-	SSL_CTX_set_mode(appl_state->ssl_ctx,
-			 SSL_MODE_ENABLE_PARTIAL_WRITE
-			 | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-    }
-    vstring_free(init_buf_for_hashing);
-    vstring_free(init_buf);
-    vstring_free(param_buf);
-    return (appl_state);
-}
-
 /* tlsp_close_event - pre-handshake plaintext-client close event */
 
 static void tlsp_close_event(int event, void *context)
@@ -1367,6 +1139,12 @@ static void tlsp_get_request_event(int event, void *context)
     /*
      * Receive the initial request attributes. Receive the remainder after we
      * figure out what role we are expected to play.
+     * 
+     * The tlsproxy server does not enforce per-request read/write deadlines or
+     * minimal data rates. Instead, the tlsproxy server relies on the
+     * tlsproxy client to enforce these context-dependent limits. When a
+     * tlsproxy client decides to time out, it will close its end of the
+     * tlsproxy stream, and the tlsproxy server will handle that immediately.
      */
     if (event != EVENT_READ
 	|| attr_scan(plaintext_stream, ATTR_FLAG_STRICT,
@@ -1406,9 +1184,13 @@ static void tlsp_get_request_event(int event, void *context)
     switch (req_flags & (TLS_PROXY_FLAG_ROLE_CLIENT | TLS_PROXY_FLAG_ROLE_SERVER)) {
     case TLS_PROXY_FLAG_ROLE_CLIENT:
 	state->is_server_role = 0;
+	if (req_flags & TLS_PROXY_FLAG_PROBE_ONLY) {
+	    ready = tlsp_client_role_ready;
+	    break;
+	}
 	if (attr_scan(plaintext_stream, ATTR_FLAG_STRICT,
 		      RECV_ATTR_FUNC(tls_proxy_client_param_scan,
-				     (void *) &state->tls_params),
+				     (void *) &state->client_params),
 		      RECV_ATTR_FUNC(tls_proxy_client_init_scan,
 				     (void *) &state->client_init_props),
 		      RECV_ATTR_FUNC(tls_proxy_client_start_scan,
@@ -1418,13 +1200,31 @@ static void tlsp_get_request_event(int event, void *context)
 	    tlsp_state_free(state);
 	    return;
 	}
-	state->appl_state = tlsp_client_init(state->tls_params,
+	state->appl_state = tlsp_client_init(state->client_params,
 					     state->client_init_props);
 	ready = state->appl_state != 0;
 	break;
     case TLS_PROXY_FLAG_ROLE_SERVER:
 	state->is_server_role = 1;
-	ready = (tlsp_server_ctx != 0);
+	if (req_flags & TLS_PROXY_FLAG_PROBE_ONLY) {
+	    ready = tlsp_server_role_ready;
+	    break;
+	}
+	if (attr_scan(plaintext_stream, ATTR_FLAG_STRICT,
+		      RECV_ATTR_FUNC(tls_proxy_server_param_scan,
+				     (void *) &state->server_params),
+		      RECV_ATTR_FUNC(tls_proxy_server_init_scan,
+				     (void *) &state->server_init_props),
+		      RECV_ATTR_FUNC(tls_proxy_server_start_scan,
+				     (void *) &state->server_start_props),
+		      ATTR_TYPE_END) != 3) {
+	    msg_warn("%s: receive server TLS settings: %m", myname);
+	    tlsp_state_free(state);
+	    return;
+	}
+	state->appl_state = tlsp_server_init(state->server_params,
+					     state->server_init_props);
+	ready = state->appl_state != 0;
 	break;
     default:
 	state->is_server_role = 0;
@@ -1443,11 +1243,13 @@ static void tlsp_get_request_event(int event, void *context)
 		   SEND_ATTR_INT(MAIL_ATTR_STATUS, ready),
 		   ATTR_TYPE_END) != 0
 	|| vstream_fflush(plaintext_stream) != 0
+	|| (req_flags & TLS_PROXY_FLAG_PROBE_ONLY)
 	|| ready == 0) {
 	tlsp_request_read_event(plaintext_fd, tlsp_close_event,
 				TLSP_INIT_TIMEOUT, (void *) state);
 	return;
     } else {
+	state->flags |= TLSP_FLAG_DO_HANDSHAKE;
 	tlsp_request_read_event(plaintext_fd, tlsp_get_fd_event,
 				TLSP_INIT_TIMEOUT, (void *) state);
 	return;
@@ -1481,260 +1283,18 @@ static void tlsp_service(VSTREAM *plaintext_stream,
 		    CA_VSTREAM_CTL_TIMEOUT(5),
 		    CA_VSTREAM_CTL_END);
 
+    (void) attr_print(plaintext_stream, ATTR_FLAG_NONE,
+		   SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_TLSPROXY),
+		      ATTR_TYPE_END);
+    if (vstream_fflush(plaintext_stream) != 0)
+	msg_warn("write %s attribute: %m", MAIL_ATTR_PROTO);
+
     /*
      * Receive postscreen's remote SMTP client address/port and socket.
      */
     state = tlsp_state_create(service, plaintext_stream);
     tlsp_request_read_event(plaintext_fd, tlsp_get_request_event,
 			    TLSP_INIT_TIMEOUT, (void *) state);
-}
-
-/* pre_jail_init_server - pre-jail initialization */
-
-static void pre_jail_init_server(void)
-{
-    TLS_SERVER_INIT_PROPS props;
-    const char *cert_file;
-    int     have_server_cert;
-    int     no_server_cert_ok;
-    int     require_server_cert;
-
-    /*
-     * The code in this routine is pasted literally from smtpd(8). I am not
-     * going to sanitize this because doing so surely will break things in
-     * unexpected ways.
-     */
-    if (*var_tlsp_tls_level) {
-	switch (tls_level_lookup(var_tlsp_tls_level)) {
-	default:
-	    msg_fatal("Invalid TLS level \"%s\"", var_tlsp_tls_level);
-	    /* NOTREACHED */
-	    break;
-	case TLS_LEV_SECURE:
-	case TLS_LEV_VERIFY:
-	case TLS_LEV_FPRINT:
-	    msg_warn("%s: unsupported TLS level \"%s\", using \"encrypt\"",
-		     VAR_TLSP_TLS_LEVEL, var_tlsp_tls_level);
-	    /* FALLTHROUGH */
-	case TLS_LEV_ENCRYPT:
-	    var_tlsp_enforce_tls = var_tlsp_use_tls = 1;
-	    break;
-	case TLS_LEV_MAY:
-	    var_tlsp_enforce_tls = 0;
-	    var_tlsp_use_tls = 1;
-	    break;
-	case TLS_LEV_NONE:
-	    var_tlsp_enforce_tls = var_tlsp_use_tls = 0;
-	    break;
-	}
-    }
-    var_tlsp_use_tls = var_tlsp_use_tls || var_tlsp_enforce_tls;
-    if (!var_tlsp_use_tls) {
-	msg_warn("TLS server role is disabled with %s or %s",
-		 VAR_TLSP_TLS_LEVEL, VAR_TLSP_USE_TLS);
-	return;
-    }
-
-    /*
-     * Load TLS keys before dropping privileges.
-     * 
-     * Can't use anonymous ciphers if we want client certificates. Must use
-     * anonymous ciphers if we have no certificates.
-     */
-    ask_client_cert = require_server_cert =
-	(var_tlsp_tls_ask_ccert
-	 || (var_tlsp_enforce_tls && var_tlsp_tls_req_ccert));
-    if (strcasecmp(var_tlsp_tls_cert_file, "none") == 0) {
-	no_server_cert_ok = 1;
-	cert_file = "";
-    } else {
-	no_server_cert_ok = 0;
-	cert_file = var_tlsp_tls_cert_file;
-    }
-    have_server_cert =
-	(*cert_file || *var_tlsp_tls_dcert_file || *var_tlsp_tls_eccert_file);
-
-    if (*var_tlsp_tls_chain_files != 0) {
-	if (!have_server_cert)
-	    have_server_cert = 1;
-	else
-	    msg_warn("Both %s and one or more of the legacy "
-		     " %s, %s or %s are non-empty; the legacy "
-		     " parameters will be ignored",
-		     VAR_TLSP_TLS_CHAIN_FILES,
-		     VAR_TLSP_TLS_CERT_FILE,
-		     VAR_TLSP_TLS_ECCERT_FILE,
-		     VAR_TLSP_TLS_DCERT_FILE);
-    }
-    /* Some TLS configuration errors are not show stoppers. */
-    if (!have_server_cert && require_server_cert)
-	msg_warn("Need a server cert to request client certs");
-    if (!var_tlsp_enforce_tls && var_tlsp_tls_req_ccert)
-	msg_warn("Can't require client certs unless TLS is required");
-    /* After a show-stopper error, log a warning. */
-    if (have_server_cert || (no_server_cert_ok && !require_server_cert)) {
-
-	tls_pre_jail_init(TLS_ROLE_SERVER);
-
-	/*
-	 * Large parameter lists are error-prone, so we emulate a language
-	 * feature that C does not have natively: named parameter lists.
-	 */
-	tlsp_server_ctx =
-	    TLS_SERVER_INIT(&props,
-			    log_param = VAR_TLSP_TLS_LOGLEVEL,
-			    log_level = var_tlsp_tls_loglevel,
-			    verifydepth = var_tlsp_tls_ccert_vd,
-			    cache_type = TLS_MGR_SCACHE_SMTPD,
-			    set_sessid = var_tlsp_tls_set_sessid,
-			    chain_files = var_tlsp_tls_chain_files,
-			    cert_file = cert_file,
-			    key_file = var_tlsp_tls_key_file,
-			    dcert_file = var_tlsp_tls_dcert_file,
-			    dkey_file = var_tlsp_tls_dkey_file,
-			    eccert_file = var_tlsp_tls_eccert_file,
-			    eckey_file = var_tlsp_tls_eckey_file,
-			    CAfile = var_tlsp_tls_CAfile,
-			    CApath = var_tlsp_tls_CApath,
-			    dh1024_param_file
-			    = var_tlsp_tls_dh1024_param_file,
-			    dh512_param_file
-			    = var_tlsp_tls_dh512_param_file,
-			    eecdh_grade = var_tlsp_tls_eecdh,
-			    protocols = var_tlsp_enforce_tls ?
-			    var_tlsp_tls_mand_proto :
-			    var_tlsp_tls_proto,
-			    ask_ccert = ask_client_cert,
-			    mdalg = var_tlsp_tls_fpt_dgst);
-    } else {
-	msg_warn("No server certs available. TLS can't be enabled");
-    }
-
-    /*
-     * To maintain sanity, allow partial SSL_write() operations, and allow
-     * SSL_write() buffer pointers to change after a WANT_READ or WANT_WRITE
-     * result. This is based on OpenSSL developers talking on a mailing list,
-     * but is not supported by documentation. If this code stops working then
-     * no-one can be held responsible.
-     */
-    if (tlsp_server_ctx)
-	SSL_CTX_set_mode(tlsp_server_ctx->ssl_ctx,
-			 SSL_MODE_ENABLE_PARTIAL_WRITE
-			 | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-}
-
-/* pre_jail_init_client - pre-jail initialization */
-
-static void pre_jail_init_client(void)
-{
-    int     clnt_use_tls;
-
-    /*
-     * The cache with TLS_APPL_STATE instances for different TLS_CLIENT_INIT
-     * configurations.
-     */
-    tlsp_client_app_cache = htable_create(10);
-
-    /*
-     * Most sites don't use TLS client certs/keys. In that case, enabling
-     * tlsproxy-based connection caching is trivial.
-     * 
-     * But some sites do use TLS client certs/keys, and that is challenging when
-     * tlsproxy runs in a post-jail environment: chroot breaks pathname
-     * resolution, and an unprivileged process should not be able to open
-     * files with secrets. The workaround: assume that most of those sites
-     * will use a fixed TLS client identity. In that case, tlsproxy can load
-     * the corresponding certs/keys at pre-jail time, so that secrets can
-     * remain read-only for root. As long as the tlsproxy pre-jail TLS client
-     * configuration with cert or key pathnames is the same as the one used
-     * in the Postfix SMTP client, sites can selectively or globally enable
-     * tlsproxy-based connection caching without additional TLS
-     * configuration.
-     * 
-     * Loading one TLS client configuration at pre-jail time is not sufficient
-     * for the minority of sites that want to use TLS connection caching with
-     * multiple TLS client identities. To alert the operator, tlsproxy will
-     * log a warning when a TLS_CLIENT_INIT message specifies a different
-     * configuration than the tlsproxy pre-jail client configuration, and
-     * that different configuration specifies file/directory pathname
-     * arguments. The workaround is to have one tlsproxy process per TLS
-     * client identity.
-     * 
-     * The general solution for single-identity or multi-identity clients is to
-     * stop loading certs and keys from individual files. Instead, have a
-     * cert/key map, indexed by client identity, read-only by root. After
-     * opening the map as root at pre-jail time, tlsproxy can read certs/keys
-     * on-the-fly as an unprivileged process at post-jail time. This is the
-     * approach that was already proposed for server-side SNI support, and it
-     * could be reused here. It would also end the proliferation of RSA
-     * cert/key parameters, DSA cert/key parameters, EC cert/key parameters,
-     * and so on.
-     * 
-     * Horror: In order to create the same pre-jail TLS client context as the
-     * one used in the Postfix SMTP client, we have to duplicate intricate
-     * SMTP client code, including a handful configuration parameters that
-     * tlsproxy does not need. We must duplicate the logic, so that we only
-     * load certs and keys when the SMTP client would load them.
-     */
-    if (*var_tlsp_clnt_level != 0)
-	switch (tls_level_lookup(var_tlsp_clnt_level)) {
-	case TLS_LEV_SECURE:
-	case TLS_LEV_VERIFY:
-	case TLS_LEV_DANE_ONLY:
-	case TLS_LEV_FPRINT:
-	case TLS_LEV_ENCRYPT:
-	    var_tlsp_clnt_use_tls = var_tlsp_clnt_enforce_tls = 1;
-	    break;
-	case TLS_LEV_DANE:
-	case TLS_LEV_MAY:
-	    var_tlsp_clnt_use_tls = 1;
-	    var_tlsp_clnt_enforce_tls = 0;
-	    break;
-	case TLS_LEV_NONE:
-	    var_tlsp_clnt_use_tls = var_tlsp_clnt_enforce_tls = 0;
-	    break;
-	default:
-	    /* tls_level_lookup() logs no warning. */
-	    /* session_tls_init() assumes that var_tlsp_clnt_level is sane. */
-	    msg_fatal("Invalid TLS level \"%s\"", var_tlsp_clnt_level);
-	}
-    clnt_use_tls = (var_tlsp_clnt_use_tls || var_tlsp_clnt_enforce_tls);
-
-    /*
-     * Initialize the TLS data before entering the chroot jail.
-     */
-    if (clnt_use_tls || var_tlsp_clnt_per_site[0] || var_tlsp_clnt_policy[0]) {
-	TLS_CLIENT_PARAMS tls_params;
-	TLS_CLIENT_INIT_PROPS init_props;
-
-	tls_pre_jail_init(TLS_ROLE_CLIENT);
-
-	/*
-	 * We get stronger type safety and a cleaner interface by combining
-	 * the various parameters into a single tls_client_props structure.
-	 * 
-	 * Large parameter lists are error-prone, so we emulate a language
-	 * feature that C does not have natively: named parameter lists.
-	 */
-	(void) tls_proxy_client_param_from_config(&tls_params);
-	(void) TLS_CLIENT_INIT_ARGS(&init_props,
-				    log_param = var_tlsp_clnt_logparam,
-				    log_level = var_tlsp_clnt_loglevel,
-				    verifydepth = var_tlsp_clnt_scert_vd,
-				    cache_type = TLS_MGR_SCACHE_SMTP,
-				    chain_files = var_tlsp_clnt_chain_files,
-				    cert_file = var_tlsp_clnt_cert_file,
-				    key_file = var_tlsp_clnt_key_file,
-				    dcert_file = var_tlsp_clnt_dcert_file,
-				    dkey_file = var_tlsp_clnt_dkey_file,
-				    eccert_file = var_tlsp_clnt_eccert_file,
-				    eckey_file = var_tlsp_clnt_eckey_file,
-				    CAfile = var_tlsp_clnt_CAfile,
-				    CApath = var_tlsp_clnt_CApath,
-				    mdalg = var_tlsp_clnt_fpt_dgst);
-	if (tlsp_client_init(&tls_params, &init_props) == 0)
-	    msg_warn("TLS client initialization failed");
-    }
 }
 
 /* pre_jail_init - pre-jail initialization */
@@ -1745,20 +1305,8 @@ static void pre_jail_init(char *unused_name, char **unused_argv)
     /*
      * Initialize roles separately.
      */
-    pre_jail_init_server();
-    pre_jail_init_client();
-
-    /*
-     * tlsp_client_init() needs to know if it is called pre-jail or
-     * post-jail.
-     */
-    tlsp_pre_jail_done = 1;
-
-    /*
-     * Bug: TLS_CLIENT_PARAMS attributes are not used when creating a
-     * TLS_APPL_STATE instance; we can only warn about attribute mismatches.
-     */
-    tlsp_params_mismatch_filter = been_here_init(BH_BOUND_NONE, BH_FLAG_NONE);
+    tlsp_server_role_ready = pre_jail_init_server();
+    tlsp_client_role_ready = tlsp_pre_jail_client_init();
 }
 
 MAIL_VERSION_STAMP_DECLARE;
@@ -1796,6 +1344,7 @@ int     main(int argc, char **argv)
 	VAR_SMTPD_ENFORCE_TLS, DEF_SMTPD_ENFORCE_TLS, &var_smtpd_enforce_tls,
 	VAR_SMTPD_TLS_ACERT, DEF_SMTPD_TLS_ACERT, &var_smtpd_tls_ask_ccert,
 	VAR_SMTPD_TLS_RCERT, DEF_SMTPD_TLS_RCERT, &var_smtpd_tls_req_ccert,
+	VAR_SMTPD_TLS_ENABLE_RPK, DEF_SMTPD_TLS_ENABLE_RPK, &var_smtpd_tls_enable_rpk,
 	VAR_SMTPD_TLS_SET_SESSID, DEF_SMTPD_TLS_SET_SESSID, &var_smtpd_tls_set_sessid,
 	VAR_SMTP_USE_TLS, DEF_SMTP_USE_TLS, &var_smtp_use_tls,
 	VAR_SMTP_ENFORCE_TLS, DEF_SMTP_ENFORCE_TLS, &var_smtp_enforce_tls,
@@ -1806,6 +1355,7 @@ int     main(int argc, char **argv)
 	VAR_TLSP_ENFORCE_TLS, DEF_TLSP_ENFORCE_TLS, &var_tlsp_enforce_tls,
 	VAR_TLSP_TLS_ACERT, DEF_TLSP_TLS_ACERT, &var_tlsp_tls_ask_ccert,
 	VAR_TLSP_TLS_RCERT, DEF_TLSP_TLS_RCERT, &var_tlsp_tls_req_ccert,
+	VAR_TLSP_TLS_ENABLE_RPK, DEF_TLSP_TLS_ENABLE_RPK, &var_tlsp_tls_enable_rpk,
 	VAR_TLSP_TLS_SET_SESSID, DEF_TLSP_TLS_SET_SESSID, &var_tlsp_tls_set_sessid,
 	VAR_TLSP_CLNT_USE_TLS, DEF_TLSP_CLNT_USE_TLS, &var_tlsp_clnt_use_tls,
 	VAR_TLSP_CLNT_ENFORCE_TLS, DEF_TLSP_CLNT_ENFORCE_TLS, &var_tlsp_clnt_enforce_tls,
@@ -1872,7 +1422,6 @@ int     main(int argc, char **argv)
 	VAR_TLSP_TLS_LOGLEVEL, DEF_TLSP_TLS_LOGLEVEL, &var_tlsp_tls_loglevel, 0, 0,
 	VAR_TLSP_TLS_LEVEL, DEF_TLSP_TLS_LEVEL, &var_tlsp_tls_level, 0, 0,
 	VAR_TLSP_CLNT_LOGLEVEL, DEF_TLSP_CLNT_LOGLEVEL, &var_tlsp_clnt_loglevel, 0, 0,
-	VAR_TLSP_CLNT_LOGPARAM, DEF_TLSP_CLNT_LOGPARAM, &var_tlsp_clnt_logparam, 0, 0,
 	VAR_TLSP_CLNT_CHAIN_FILES, DEF_TLSP_CLNT_CHAIN_FILES, &var_tlsp_clnt_chain_files, 0, 0,
 	VAR_TLSP_CLNT_CERT_FILE, DEF_TLSP_CLNT_CERT_FILE, &var_tlsp_clnt_cert_file, 0, 0,
 	VAR_TLSP_CLNT_KEY_FILE, DEF_TLSP_CLNT_KEY_FILE, &var_tlsp_clnt_key_file, 0, 0,

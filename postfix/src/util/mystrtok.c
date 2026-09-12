@@ -14,6 +14,26 @@
 /*	char	**bufp;
 /*	const char *delimiters;
 /*	const char *parens;
+/*
+/*	char	*mystrtokdq(bufp, delimiters)
+/*	char	**bufp;
+/*	const char *delimiters;
+/*
+/*	char	*mystrtok_cw(bufp, delimiters, blame)
+/*	char	**bufp;
+/*	const char *delimiters;
+/*	const char *blame;
+/*
+/*	char	*mystrtokq_cw(bufp, delimiters, parens, blame)
+/*	char	**bufp;
+/*	const char *delimiters;
+/*	const char *parens;
+/*	const char *blame;
+/*
+/*	char	*mystrtokdq_cw(bufp, delimiters, blame)
+/*	char	**bufp;
+/*	const char *delimiters;
+/*	const char *blame;
 /* DESCRIPTION
 /*	mystrtok() splits a buffer on the specified \fIdelimiters\fR.
 /*	Tokens are delimited by runs of delimiters, so this routine
@@ -24,11 +44,22 @@
 /*	opening and closing parenthesis (one of each).  The set of
 /*	\fIparens\fR must be distinct from the set of \fIdelimiters\fR.
 /*
+/*	mystrtokdq() is like mystrtok() but will not split text
+/*	between double quotes. The backslash character may be used
+/*	to escape characters. The double quote and backslash
+/*	character must not appear in the set of \fIdelimiters\fR.
+/*
 /*	The \fIbufp\fR argument specifies the start of the search; it
 /*	is updated with each call. The input is destroyed.
 /*
 /*	The result value is the next token, or a null pointer when the
 /*	end of the buffer was reached.
+/*
+/*	mystrtok_cw(), mystrtokq_cw(), and mystrtokdq_cw, log a
+/*	warning and return null when the result would look like
+/*	comment. The \fBblame\fR argument provides context for
+/*	warning messages. Specify a null pointer to disable the
+/*	comment check.
 /* LICENSE
 /* .ad
 /* .fi
@@ -38,20 +69,43 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
 
-#include "sys_defs.h"
+#include <sys_defs.h>
 #include <string.h>
 
 /* Utility library. */
 
-#include "stringops.h"
+#include <msg.h>
+#include <stringops.h>
+
+/* mystrtok_warn - warn for #comment after other text */
+
+static void mystrtok_warn(const char *start, const char *bufp, const char *blame)
+{
+    msg_warn("%s: #comment after other text is not allowed: %s %.20s...",
+	     blame, start, bufp);
+}
+
+/* mystrtok - ABI compatibility wrapper */
+
+#undef mystrtok
+
+char   *mystrtok(char **src, const char *sep)
+{
+    return (mystrtok_cw(src, sep, (char *) 0));
+}
 
 /* mystrtok - safe tokenizer */
 
-char   *mystrtok(char **src, const char *sep)
+char   *mystrtok_cw(char **src, const char *sep, const char *blame)
 {
     char   *start = *src;
     char   *end;
@@ -72,15 +126,31 @@ char   *mystrtok(char **src, const char *sep)
     if (*end != 0)
 	*end++ = 0;
     *src = end;
-    return (start);
+
+    if (blame && *start == '#') {
+	mystrtok_warn(start, *src, blame);
+	return (0);
+    } else {
+	return (start);
+    }
 }
 
-/* mystrtokq - safe tokenizer with quoting support */
+/* mystrtokq - ABI compatibility wrapper */
+
+#undef mystrtokq
 
 char   *mystrtokq(char **src, const char *sep, const char *parens)
 {
+    return (mystrtokq_cw(src, sep, parens, (char *) 0));
+}
+
+/* mystrtokq_cw - safe tokenizer with quoting support */
+
+char   *mystrtokq_cw(char **src, const char *sep, const char *parens,
+		             const char *blame)
+{
     char   *start = *src;
-    static char   *cp;
+    static char *cp;
     int     ch;
     int     level;
 
@@ -99,7 +169,7 @@ char   *mystrtokq(char **src, const char *sep, const char *parens)
     for (level = 0, cp = start; (ch = *(unsigned char *) cp) != 0; cp++) {
 	if (ch == parens[0]) {
 	    level++;
-        } else if (level > 0 && ch == parens[1]) {
+	} else if (level > 0 && ch == parens[1]) {
 	    level--;
 	} else if (level == 0 && strchr(sep, ch) != 0) {
 	    *cp++ = 0;
@@ -107,37 +177,62 @@ char   *mystrtokq(char **src, const char *sep, const char *parens)
 	}
     }
     *src = cp;
-    return (start);
-}
 
-#ifdef TEST
-
- /*
-  * Test program: read lines from stdin, split on whitespace.
-  */
-#include "vstring.h"
-#include "vstream.h"
-#include "vstring_vstream.h"
-
-int     main(void)
-{
-    VSTRING *vp = vstring_alloc(100);
-    char   *start;
-    char   *str;
-
-    while (vstring_fgets(vp, VSTREAM_IN) && VSTRING_LEN(vp) > 0) {
-	start = vstring_str(vp);
-	if (strchr(start, CHARS_BRACE[0]) == 0) {
-	    while ((str = mystrtok(&start, CHARS_SPACE)) != 0)
-		vstream_printf(">%s<\n", str);
-	} else {
-	    while ((str = mystrtokq(&start, CHARS_SPACE, CHARS_BRACE)) != 0)
-		vstream_printf(">%s<\n", str);
-	}
-	vstream_fflush(VSTREAM_OUT);
+    if (blame && *start == '#') {
+	mystrtok_warn(start, *src, blame);
+	return (0);
+    } else {
+	return (start);
     }
-    vstring_free(vp);
-    return (0);
 }
 
-#endif
+/* mystrtokdq - ABI compatibility wrapper */
+
+#undef mystrtokdq
+
+char   *mystrtokdq(char **src, const char *sep)
+{
+    return (mystrtokdq_cw(src, sep, (char *) 0));
+}
+
+/* mystrtokdq_cw - safe tokenizer, double quote and backslash support */
+
+char   *mystrtokdq_cw(char **src, const char *sep, const char *blame)
+{
+    char   *cp = *src;
+    char   *start;
+
+    /*
+     * Skip leading delimiters.
+     */
+    cp += strspn(cp, sep);
+
+    /*
+     * Skip to next unquoted space or comma.
+     */
+    if (*cp == 0) {
+	start = 0;
+    } else {
+	int     in_quotes;
+
+	for (in_quotes = 0, start = cp; *cp; cp++) {
+	    if (*cp == '\\') {
+		if (*++cp == 0)
+		    break;
+	    } else if (*cp == '"') {
+		in_quotes = !in_quotes;
+	    } else if (!in_quotes && strchr(sep, *(unsigned char *) cp) != 0) {
+		*cp++ = 0;
+		break;
+	    }
+	}
+    }
+    *src = cp;
+
+    if (blame && start && *start == '#') {
+	mystrtok_warn(start, *src, blame);
+	return (0);
+    } else {
+	return (start);
+    }
+}

@@ -23,7 +23,7 @@ req() {
     key "$key"
     openssl req -new -sha256 -key "${key}.pem" 2>/dev/null \
 	-config <(printf "[req]\n%s\n%s\n[dn]\nCN=%s\n" \
-		   "prompt = no" "distinguished_name = dn" "${cn}") 
+		   "prompt = no" "distinguished_name = dn" "${cn}")
 }
 
 req_nocn() {
@@ -32,7 +32,7 @@ req_nocn() {
     key "$key"
     openssl req -new -sha256 -subj / -key "${key}.pem" 2>/dev/null \
 	-config <(printf "[req]\n%s\n[dn]\nCN_default =\n" \
-		   "distinguished_name = dn") 
+		   "distinguished_name = dn")
 }
 
 cert() {
@@ -51,6 +51,7 @@ genroot() {
     local akid=$1; shift
 
     exts=$(printf "%s\n%s\n%s\n" "$skid" "$akid" "basicConstraints = CA:true")
+    key "$key"
     req "$key" "$cn" |
     	cert "$cert" "$exts" -signkey "${key}.pem" -set_serial 1 -days 30
 }
@@ -65,6 +66,7 @@ genca() {
     local cakey=$1; shift
 
     exts=$(printf "%s\n%s\n%s\n" "$skid" "$akid" "basicConstraints = CA:true")
+    key "$key"
     req "$key" "$cn" |
     	cert "$cert" "$exts" -CA "${ca}.pem" -CAkey "${cakey}.pem" \
 	    -set_serial 2 -days 30 "$@"
@@ -83,6 +85,7 @@ genee() {
 	    "basicConstraints = CA:false" \
 	    "extendedKeyUsage = serverAuth" \
 	    "subjectAltName = @alts" "DNS=${cn}")
+    key "$key"
     req "$key" "$cn" |
     	cert "$cert" "$exts" -CA "${ca}.pem" -CAkey "${cakey}.pem" \
 	    -set_serial 2 -days 30 "$@"
@@ -99,6 +102,7 @@ genss() {
 	    "basicConstraints = CA:true" \
 	    "extendedKeyUsage = serverAuth" \
 	    "subjectAltName = @alts" "DNS=${cn}")
+    key "$key"
     req "$key" "$cn" |
 	cert "$cert" "$exts" -set_serial 1 -days 30 -signkey "${key}.pem" "$@"
 }
@@ -107,8 +111,9 @@ gennocn() {
     local key=$1; shift
     local cert=$1; shift
 
+    key "$key"
     req_nocn "$key" |
-	cert "$cert" "" -signkey "${key}.pem" -set_serial 1 -days -1 "$@"
+	cert "$cert" "" -signkey "${key}.pem" -set_serial 1 -days 0 "$@"
 }
 
 runtest() {
@@ -131,7 +136,7 @@ runtest() {
     printf "%d %d %d %-24s %s: " "$usage" "$selector" "$mtype" "$tlsa" "$desc"
 
     if [ -n "$ca" ]; then ca="$ca.pem"; fi
-    "$TEST" "$usage" "$selector" "$digest" "$tlsa.pem" "$ca" "$chain.pem" \
+    "$TEST" "$usage" "$selector" "$mtype" "$tlsa.pem" "$ca" "$chain.pem" \
     	"$@" > /dev/null
 }
 
@@ -191,16 +196,21 @@ done
 done
 done
 
-# These tests don't depend in the akid/skid chaining:
+# These tests don't depend on the akid/skid chaining:
 #
 for s in 0 1
 do
   checkfail "missing TA" 2 "$s" 1 rootcert "" chain1 "$HOST"
   for m in 0 1 2
   do
-    checkpass "depth 0 TA" 2 "$s" "$m" sscert "" sscert "$HOST" 
+    # Special-case "2 1 0" TLSA records. These match as issuer public keys of a
+    # self-signed EE cert.  The same key as part of a "2 0 0" certificate would
+    # not match.
+    #
+    if [ "$s" -ne 1 -o "$m" -ne 0 ]; then
+        checkfail "depth 0 TA" 2 "$s" "$m" sscert "" sscert "$HOST"
+    fi
     checkfail "non-TA" 2 "$s" "$m" eecert rootcert chain "$HOST"
-    checkfail "depth 0 TA namecheck" 2 "$s" "$m" sscert sscert sscert whatever
 
     checkpass "valid EE" 3 "$s" "$m" eecert "" chain whatever
     checkpass "key-only EE" 3 "$s" "$m" acert "" acert whatever
@@ -208,4 +218,9 @@ do
   done
 done
 
-rm -f *.pem
+rm -f acert.pem akey.pem \
+    eecert.pem eekey.pem \
+    cacert?.pem cakey?.pem \
+    rootcert.pem rootkey.pem \
+    sscert.pem sskey.pem \
+    chain.pem chain1.pem

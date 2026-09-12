@@ -61,6 +61,11 @@
 /*	IBM T.J. Watson Research
 /*	P.O. Box 704
 /*	Yorktown Heights, NY 10598, USA
+/*
+/*	Wietse Venema
+/*	Google, Inc.
+/*	111 8th Avenue
+/*	New York, NY 10011, USA
 /*--*/
 
 /* System library. */
@@ -109,7 +114,7 @@ void    qmgr_feedback_init(QMGR_FEEDBACK *fb,
     double  enum_val;
     char    denom_str[30 + 1];
     double  denom_val;
-    char    slash;
+    char    slash[1 + 1];
     char    junk;
     char   *fbck_name;
     char   *fbck_val;
@@ -135,7 +140,7 @@ void    qmgr_feedback_init(QMGR_FEEDBACK *fb,
     fb->base = -1;				/* assume error */
 
     switch (sscanf(fbck_val, "%lf %1[/] %30s%c",
-		   &enum_val, &slash, denom_str, &junk)) {
+		   &enum_val, slash, denom_str, &junk)) {
     case 1:
 	fb->index = QMGR_FEEDBACK_IDX_NONE;
 	fb->base = enum_val;

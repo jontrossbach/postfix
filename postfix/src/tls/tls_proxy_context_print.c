@@ -10,14 +10,14 @@
 /*	ATTR_PRINT_COMMON_FN print_fn;
 /*	VSTREAM *stream;
 /*	int     flags;
-/*	void    *ptr;
+/*	const void *ptr;
 /* DESCRIPTION
 /*	tls_proxy_context_print() writes the public members of a
 /*	TLS_ATTR_STATE structure to the named stream using the
 /*	specified attribute print routine. tls_proxy_context_print()
 /*	is meant to be passed as a call-back to attr_print(), thusly:
 /*
-/*	... SEND_ATTR_FUNC(tls_proxy_context_print, (void *) tls_context), ...
+/*	... SEND_ATTR_FUNC(tls_proxy_context_print, (const void *) tls_context), ...
 /* DIAGNOSTICS
 /*	Fatal: out of memory.
 /* LICENSE
@@ -54,9 +54,9 @@
 /* tls_proxy_context_print - send TLS session state over stream */
 
 int     tls_proxy_context_print(ATTR_PRINT_COMMON_FN print_fn, VSTREAM *fp,
-				        int flags, void *ptr)
+				        int flags, const void *ptr)
 {
-    TLS_SESS_STATE *tp = (TLS_SESS_STATE *) ptr;
+    const TLS_SESS_STATE *tp = (const TLS_SESS_STATE *) ptr;
     int     ret;
 
 #define STRING_OR_EMPTY(s) ((s) ? (s) : "")
@@ -88,6 +88,10 @@ int     tls_proxy_context_print(ATTR_PRINT_COMMON_FN print_fn, VSTREAM *fp,
 				 STRING_OR_EMPTY(tp->kex_curve)),
 		   SEND_ATTR_INT(TLS_ATTR_KEX_BITS,
 				 tp->kex_bits),
+		   SEND_ATTR_INT(TLS_ATTR_CTOS_RPK,
+				 tp->ctos_rpk),
+		   SEND_ATTR_INT(TLS_ATTR_STOC_RPK,
+				 tp->stoc_rpk),
 		   SEND_ATTR_STR(TLS_ATTR_CLNT_SIG_NAME,
 				 STRING_OR_EMPTY(tp->clnt_sig_name)),
 		   SEND_ATTR_STR(TLS_ATTR_CLNT_SIG_CURVE,
@@ -106,6 +110,10 @@ int     tls_proxy_context_print(ATTR_PRINT_COMMON_FN print_fn, VSTREAM *fp,
 				 STRING_OR_EMPTY(tp->srvr_sig_dgst)),
 		   SEND_ATTR_STR(TLS_ATTR_NAMADDR,
 				 STRING_OR_EMPTY(tp->namaddr)),
+		   SEND_ATTR_INT(TLS_ATTR_RPT_REPORTED,
+				 tp->rpt_reported),
+		   SEND_ATTR_INT(TLS_ATTR_TRACE_SIZE_LIMIT,
+				 tp->trace_size_limit),
 		   ATTR_TYPE_END);
     /* Do not flush the stream. */
     return (ret);

@@ -415,7 +415,7 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
     struct stat st;
     DBM    *dbm;
     char   *dbm_path = 0;
-    int     lock_fd;
+    int     lock_fd = -1;
 
     /*
      * Let the optimizer worry about eliminating redundant code.
@@ -424,6 +424,8 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
 	DICT *__d = (d); \
 	if (dbm_path != 0) \
 	    myfree(dbm_path); \
+	if (lock_fd >= 0) \
+	    (void) close(lock_fd); \
 	return (__d); \
     } while (0)
 
@@ -459,6 +461,7 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
 	    msg_fatal("unlock database %s for open: %m", dbm_path);
 	if (close(lock_fd) < 0)
 	    msg_fatal("close database %s: %m", dbm_path);
+	lock_fd = -1;
     }
     dict_dbm = (DICT_DBM *) dict_alloc(DICT_TYPE_DBM, path, sizeof(*dict_dbm));
     dict_dbm->dict.lookup = dict_dbm_lookup;
@@ -472,7 +475,8 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
 	msg_fatal("open database %s: cannot support GDBM", path);
     if (fstat(dict_dbm->dict.stat_fd, &st) < 0)
 	msg_fatal("dict_dbm_open: fstat: %m");
-    dict_dbm->dict.mtime = st.st_mtime;
+    if (open_flags == O_RDONLY)
+	dict_dbm->dict.mtime = st.st_mtime;
     dict_dbm->dict.owner.uid = st.st_uid;
     dict_dbm->dict.owner.status = (st.st_uid != 0);
 
@@ -481,6 +485,7 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
      * the source file changed only seconds ago.
      */
     if ((dict_flags & DICT_FLAG_LOCK) != 0
+	&& open_flags == O_RDONLY
 	&& stat(path, &st) == 0
 	&& st.st_mtime > dict_dbm->dict.mtime
 	&& st.st_mtime < time((time_t *) 0) - 100)
@@ -497,7 +502,7 @@ DICT   *dict_dbm_open(const char *path, int open_flags, int dict_flags)
     dict_dbm->key_buf = 0;
     dict_dbm->val_buf = 0;
 
-    DICT_DBM_OPEN_RETURN(DICT_DEBUG (&dict_dbm->dict));
+    DICT_DBM_OPEN_RETURN(&dict_dbm->dict);
 }
 
 #endif

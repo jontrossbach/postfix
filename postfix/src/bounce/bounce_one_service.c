@@ -7,13 +7,13 @@
 /*	#include "bounce_service.h"
 /*
 /*	int     bounce_one_service(flags, queue_name, queue_id, encoding,
-/*					smtputf8, orig_sender, envid, ret,
+/*					sendopts, orig_sender, envid, ret,
 /*					rcpt_buf, dsn_buf, templates)
 /*	int	flags;
 /*	char	*queue_name;
 /*	char	*queue_id;
 /*	char	*encoding;
-/*	int	smtputf8;
+/*	int	sendopts;
 /*	char	*orig_sender;
 /*	char	*envid;
 /*	int	ret;
@@ -83,7 +83,7 @@
 /* bounce_one_service - send a bounce for one recipient */
 
 int     bounce_one_service(int flags, char *queue_name, char *queue_id,
-			           char *encoding, int smtputf8,
+			           char *encoding, int sendopts,
 			           char *orig_sender, char *dsn_envid,
 			           int dsn_ret, RCPT_BUF *rcpt_buf,
 			           DSN_BUF *dsn_buf, BOUNCE_TEMPLATES *ts)
@@ -100,7 +100,7 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
      * Initialize. Open queue file, bounce log, etc.
      */
     bounce_info = bounce_mail_one_init(queue_name, queue_id, encoding,
-				       smtputf8, dsn_envid, rcpt_buf,
+				       sendopts, dsn_envid, rcpt_buf,
 				       dsn_buf, ts->failure);
 
 #define NULL_SENDER		MAIL_ADDR_EMPTY	/* special address */
@@ -148,7 +148,7 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 						 var_2bounce_rcpt,
 						 MAIL_SRC_MASK_BOUNCE,
 						 NULL_TRACE_FLAGS,
-						 smtputf8,
+						 sendopts,
 						 new_id)) != 0) {
 
 		/*
@@ -157,6 +157,8 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 		 * reason for the bounce, and the headers of the original
 		 * message. Don't bother sending the boiler-plate text.
 		 */
+		msg_info("%s: postmaster non-delivery notification: %s",
+			 queue_id, STR(new_id));
 		if (!bounce_header(bounce, bounce_info, var_2bounce_rcpt,
 				   POSTMASTER_COPY)
 		    && bounce_recipient_log(bounce, bounce_info) == 0
@@ -164,9 +166,11 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 		    && bounce_recipient_dsn(bounce, bounce_info) == 0)
 		    bounce_original(bounce, bounce_info, DSN_RET_FULL);
 		bounce_status = post_mail_fclose(bounce);
-		if (bounce_status == 0)
-		    msg_info("%s: postmaster non-delivery notification: %s",
-			     queue_id, STR(new_id));
+		if (bounce_status)
+		    msg_warn("%s: postmaster notification failed: %s",
+			     queue_id, cleanup_strerror(bounce_status));
+	    } else {
+		msg_warn("%s: postmaster notification failed", queue_id);
 	    }
 	}
     }
@@ -185,7 +189,7 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 	    if ((bounce = post_mail_fopen_nowait(NULL_SENDER, orig_sender,
 						 MAIL_SRC_MASK_BOUNCE,
 						 NULL_TRACE_FLAGS,
-						 smtputf8,
+						 sendopts,
 						 new_id)) != 0) {
 
 		/*
@@ -193,6 +197,8 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 		 * pretends that we are a polite mail system, the text with
 		 * reason for the bounce, and a copy of the original message.
 		 */
+		msg_info("%s: sender non-delivery notification: %s",
+			 queue_id, STR(new_id));
 		if (bounce_header(bounce, bounce_info, orig_sender,
 				  NO_POSTMASTER_COPY) == 0
 		    && bounce_boilerplate(bounce, bounce_info) == 0
@@ -202,9 +208,13 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 		    bounce_original(bounce, bounce_info, dsn_ret ?
 				    dsn_ret : DSN_RET_FULL);
 		bounce_status = post_mail_fclose(bounce);
-		if (bounce_status == 0)
-		    msg_info("%s: sender non-delivery notification: %s",
-			     queue_id, STR(new_id));
+		if (bounce_status)
+		    msg_warn("%s: sender notification failed to %s: %s",
+			     queue_id, orig_sender,
+			     cleanup_strerror(bounce_status));
+	    } else {
+		msg_warn("%s: sender notification failed to %s",
+			 queue_id, orig_sender);
 	    }
 	}
 
@@ -218,7 +228,7 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 #define SEND_POSTMASTER_SINGLE_BOUNCE_NOTICE (notify_mask & MAIL_ERROR_BOUNCE)
 
 	if (bounce_status == 0 && SEND_POSTMASTER_SINGLE_BOUNCE_NOTICE
-	    && strcasecmp_utf8(orig_sender, mail_addr_double_bounce()) != 0) {
+	  && strcasecmp_utf8(orig_sender, mail_addr_double_bounce()) != 0) {
 
 	    /*
 	     * Send the text with reason for the bounce, and the headers of
@@ -231,8 +241,10 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 						 var_bounce_rcpt,
 						 MAIL_SRC_MASK_BOUNCE,
 						 NULL_TRACE_FLAGS,
-						 smtputf8,
+						 sendopts,
 						 new_id)) != 0) {
+		msg_info("%s: postmaster non-delivery notification: %s",
+			 queue_id, STR(new_id));
 		if (bounce_header(bounce, bounce_info, var_bounce_rcpt,
 				  POSTMASTER_COPY) == 0
 		    && bounce_recipient_log(bounce, bounce_info) == 0
@@ -240,9 +252,6 @@ int     bounce_one_service(int flags, char *queue_name, char *queue_id,
 		    && bounce_recipient_dsn(bounce, bounce_info) == 0)
 		    bounce_original(bounce, bounce_info, DSN_RET_HDRS);
 		postmaster_status = post_mail_fclose(bounce);
-		if (postmaster_status == 0)
-		    msg_info("%s: postmaster non-delivery notification: %s",
-			     queue_id, STR(new_id));
 	    }
 	    if (postmaster_status)
 		msg_warn("%s: postmaster notice failed while bouncing to %s",

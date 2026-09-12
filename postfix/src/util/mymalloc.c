@@ -130,6 +130,12 @@ typedef struct MBLOCK {
 #define SPACE_FOR(len)	(offsetof(MBLOCK, u.payload[0]) + len)
 
  /*
+  * The memset-before-free safety net should not be optimized out by future
+  * compilers or linkers.
+  */
+static void *(*volatile safe_memset) (void *, int, size_t) = memset;
+
+ /*
   * Optimization for short strings. We share one copy with multiple callers.
   * This differs from normal heap memory in two ways, because the memory is
   * shared:
@@ -140,6 +146,8 @@ typedef struct MBLOCK {
   * - myfree() cannot overwrite the memory with a filler pattern like it can do
   * with heap memory. Therefore, some dangling pointer bugs will be masked.
   */
+#undef NO_SHARED_EMPTY_STRINGS
+
 #ifndef NO_SHARED_EMPTY_STRINGS
 static const char empty_string[] = "";
 
@@ -151,6 +159,15 @@ void   *mymalloc(ssize_t len)
 {
     void   *ptr;
     MBLOCK *real_ptr;
+
+    /*
+     * Maintainer proofing: many people expect that a request for null memory
+     * will not result in a panic().
+     */
+#ifndef NO_SHARED_EMPTY_STRINGS
+    if (len == 0)
+	return ((void *) empty_string);
+#endif
 
     /*
      * Note: for safety reasons the request length is a signed type. This
@@ -180,6 +197,10 @@ void   *myrealloc(void *ptr, ssize_t len)
 #ifndef NO_SHARED_EMPTY_STRINGS
     if (ptr == empty_string)
 	return (mymalloc(len));
+    if (len == 0) {
+	myfree(ptr);
+	return (mymalloc(0));
+    }
 #endif
 
     /*
@@ -187,7 +208,7 @@ void   *myrealloc(void *ptr, ssize_t len)
      * allows us to catch integer overflow problems that weren't already
      * caught up-stream.
      */
-    if (len < 1)
+    if (len < 0)
 	msg_panic("myrealloc: requested length %ld", (long) len);
 #ifdef MYMALLOC_FUZZ
     len += MYMALLOC_FUZZ;
@@ -213,7 +234,7 @@ void    myfree(void *ptr)
     if (ptr != empty_string) {
 #endif
 	CHECK_IN_PTR(ptr, real_ptr, len, "myfree");
-	memset((void *) real_ptr, FILLER, SPACE_FOR(len));
+	safe_memset((void *) real_ptr, FILLER, SPACE_FOR(len));
 	free((void *) real_ptr);
 #ifndef NO_SHARED_EMPTY_STRINGS
     }
@@ -249,7 +270,7 @@ char   *mystrndup(const char *str, ssize_t len)
     if (len < 0)
 	msg_panic("mystrndup: requested length %ld", (long) len);
 #ifndef NO_SHARED_EMPTY_STRINGS
-    if (*str == 0)
+    if (*str == 0 || /* fix 20220615 */ len == 0)
 	return ((char *) empty_string);
 #endif
     if ((cp = memchr(str, 0, len)) != 0)

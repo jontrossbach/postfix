@@ -60,20 +60,8 @@ update: $(LIB_DIR)/$(LIB) $(BIN_DIR)/$(PROG) $(HDRS)
 	done
 	cd $(INC_DIR); chmod 644 $(HDRS)
 
-printfck: $(OBJS) $(PROG)
-	rm -rf printfck
-	mkdir printfck
-	cp *.h printfck
-	sed '1,/^# do not edit/!d' Makefile >printfck/Makefile
-	set -e; for i in *.c; do printfck -f .printfck $$i >printfck/$$i; done
-	cd printfck; make "INC_DIR=../../../include" `cd ..; ls *.o`
-
-lint:
-	lint $(DEFS) $(SRCS) $(LINTFIX)
-
 clean:
 	rm -f *.o *core $(PROG) junk $(LIB) 
-	rm -rf printfck
 
 tidy:	clean
 
@@ -113,6 +101,7 @@ dgram_server.o: ../../include/msg_vstream.h
 dgram_server.o: ../../include/myflock.h
 dgram_server.o: ../../include/mymalloc.h
 dgram_server.o: ../../include/nvtable.h
+dgram_server.o: ../../include/pol_stats.h
 dgram_server.o: ../../include/recipient_list.h
 dgram_server.o: ../../include/resolve_local.h
 dgram_server.o: ../../include/safe_open.h
@@ -154,6 +143,7 @@ event_server.o: ../../include/msg_vstream.h
 event_server.o: ../../include/myflock.h
 event_server.o: ../../include/mymalloc.h
 event_server.o: ../../include/nvtable.h
+event_server.o: ../../include/pol_stats.h
 event_server.o: ../../include/recipient_list.h
 event_server.o: ../../include/resolve_local.h
 event_server.o: ../../include/safe_open.h
@@ -219,6 +209,7 @@ master_conf.o: master_conf.c
 master_ent.o: ../../include/argv.h
 master_ent.o: ../../include/attr.h
 master_ent.o: ../../include/check_arg.h
+master_ent.o: ../../include/compat_level.h
 master_ent.o: ../../include/host_port.h
 master_ent.o: ../../include/htable.h
 master_ent.o: ../../include/inet_addr_host.h
@@ -375,6 +366,7 @@ multi_server.o: ../../include/msg_vstream.h
 multi_server.o: ../../include/myflock.h
 multi_server.o: ../../include/mymalloc.h
 multi_server.o: ../../include/nvtable.h
+multi_server.o: ../../include/pol_stats.h
 multi_server.o: ../../include/recipient_list.h
 multi_server.o: ../../include/resolve_local.h
 multi_server.o: ../../include/safe_open.h
@@ -417,6 +409,7 @@ single_server.o: ../../include/msg_vstream.h
 single_server.o: ../../include/myflock.h
 single_server.o: ../../include/mymalloc.h
 single_server.o: ../../include/nvtable.h
+single_server.o: ../../include/pol_stats.h
 single_server.o: ../../include/recipient_list.h
 single_server.o: ../../include/resolve_local.h
 single_server.o: ../../include/safe_open.h
@@ -459,6 +452,7 @@ trigger_server.o: ../../include/msg_vstream.h
 trigger_server.o: ../../include/myflock.h
 trigger_server.o: ../../include/mymalloc.h
 trigger_server.o: ../../include/nvtable.h
+trigger_server.o: ../../include/pol_stats.h
 trigger_server.o: ../../include/recipient_list.h
 trigger_server.o: ../../include/resolve_local.h
 trigger_server.o: ../../include/safe_open.h

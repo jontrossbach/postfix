@@ -10,6 +10,8 @@
 /*
 /*	CONFIG_BOOL_TABLE cleanup_bool_table[];
 /*
+/*	CONFIG_NBOOL_TABLE cleanup_nbool_table[];
+/*
 /*	CONFIG_STR_TABLE cleanup_str_table[];
 /*
 /*	CONFIG_TIME_TABLE cleanup_time_table[];
@@ -77,6 +79,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -100,6 +105,7 @@
 #include <mail_version.h>		/* milter_macro_v */
 #include <ext_prop.h>
 #include <flush_clnt.h>
+#include <hfrom_format.h>
 
 /* Application-specific. */
 
@@ -150,7 +156,7 @@ char   *var_rcpt_bcc_maps;		/* recipient auto-bcc maps */
 char   *var_remote_rwr_domain;		/* header-only surrogate */
 char   *var_msg_reject_chars;		/* reject these characters */
 char   *var_msg_strip_chars;		/* strip these characters */
-int     var_verp_bounce_off;		/* don't verp the bounces */
+bool    var_verp_bounce_off;		/* don't verp the bounces */
 int     var_milt_conn_time;		/* milter connect/handshake timeout */
 int     var_milt_cmd_time;		/* milter command timeout */
 int     var_milt_msg_time;		/* milter content timeout */
@@ -169,10 +175,15 @@ char   *var_milt_unk_macros;		/* unknown command macros */
 char   *var_cleanup_milters;		/* non-SMTP mail */
 char   *var_milt_head_checks;		/* post-Milter header checks */
 char   *var_milt_macro_deflts;		/* default macro settings */
-int     var_auto_8bit_enc_hdr;		/* auto-detect 8bit encoding header */
-int     var_always_add_hdrs;		/* always add missing headers */
+bool    var_auto_8bit_enc_hdr;		/* auto-detect 8bit encoding header */
+bool    var_always_add_hdrs;		/* always add missing headers */
 int     var_virt_addrlen_limit;		/* stop exponential growth */
 char   *var_hfrom_format;		/* header_from_format */
+char   *var_full_name_encoding_charset;	/* in =?charset?encoding?gibberish=? */
+bool    var_force_mime_iconv;		/* force mime downgrade on input */
+bool    var_cleanup_mask_stray_cr_lf;	/* replace stray CR or LF with space */
+char   *var_non_empty_eoh_action;	/* handle non-empty header terminator */
+bool    var_reqtls_esmtp_hdr;
 
 const CONFIG_INT_TABLE cleanup_int_table[] = {
     VAR_HOPCOUNT_LIMIT, DEF_HOPCOUNT_LIMIT, &var_hopcount_limit, 1, 0,
@@ -189,6 +200,13 @@ const CONFIG_BOOL_TABLE cleanup_bool_table[] = {
     VAR_VERP_BOUNCE_OFF, DEF_VERP_BOUNCE_OFF, &var_verp_bounce_off,
     VAR_AUTO_8BIT_ENC_HDR, DEF_AUTO_8BIT_ENC_HDR, &var_auto_8bit_enc_hdr,
     VAR_ALWAYS_ADD_HDRS, DEF_ALWAYS_ADD_HDRS, &var_always_add_hdrs,
+    VAR_FORCE_MIME_ICONV, DEF_FORCE_MIME_ICONV, &var_force_mime_iconv,
+    VAR_CLEANUP_MASK_STRAY_CR_LF, DEF_CLEANUP_MASK_STRAY_CR_LF, &var_cleanup_mask_stray_cr_lf,
+    0,
+};
+
+const CONFIG_NBOOL_TABLE cleanup_nbool_table[] = {
+    VAR_REQTLS_ESMTP_HDR, DEF_REQTLS_ESMTP_HDR, &var_reqtls_esmtp_hdr,
     0,
 };
 
@@ -240,6 +258,8 @@ const CONFIG_STR_TABLE cleanup_str_table[] = {
     VAR_MILT_HEAD_CHECKS, DEF_MILT_HEAD_CHECKS, &var_milt_head_checks, 0, 0,
     VAR_MILT_MACRO_DEFLTS, DEF_MILT_MACRO_DEFLTS, &var_milt_macro_deflts, 0, 0,
     VAR_HFROM_FORMAT, DEF_HFROM_FORMAT, &var_hfrom_format, 1, 0,
+    VAR_FULL_NAME_ENCODING_CHARSET, DEF_FULL_NAME_ENCODING_CHARSET, &var_full_name_encoding_charset, 1, 0,
+    VAR_NON_EMPTY_EOH_ACTION, DEF_NON_EMPTY_EOH_ACTION, &var_non_empty_eoh_action, 1, 0,
     0,
 };
 
@@ -282,7 +302,12 @@ MILTERS *cleanup_milters;
  /*
   * From: header format.
   */
-int     hfrom_format_code;
+int     cleanup_hfrom_format;
+
+ /*
+  * Garbage after message header.
+  */
+int     cleanup_non_empty_eoh_action;
 
 /* cleanup_all - callback for the runtime error handler */
 
@@ -426,6 +451,8 @@ void    cleanup_pre_jail(char *unused_name, char **unused_argv)
 					var_milt_eod_macros,
 					var_milt_unk_macros,
 					var_milt_macro_deflts);
+    if (*var_milt_head_checks)
+	cleanup_milter_header_checks_init();
 
     flush_init();
 }
@@ -434,10 +461,11 @@ void    cleanup_pre_jail(char *unused_name, char **unused_argv)
 
 void    cleanup_post_jail(char *unused_name, char **unused_argv)
 {
-    static const NAME_CODE hfrom_format_table[] = {
-	HFROM_FORMAT_NAME_STD, HFROM_FORMAT_CODE_STD,
-	HFROM_FORMAT_NAME_OBS, HFROM_FORMAT_CODE_OBS,
-	0, -1,
+    static NAME_CODE non_empty_eoh_actions[] = {
+	{NON_EMPTY_EOH_NAME_FIX_QUIETLY, NON_EMPTY_EOH_CODE_FIX_QUIETLY},
+	{NON_EMPTY_EOH_NAME_ADD_HDR, NON_EMPTY_EOH_CODE_ADD_HDR},
+	{NON_EMPTY_EOH_NAME_REJECT, NON_EMPTY_EOH_CODE_REJECT},
+	{0, NON_EMPTY_EOH_CODE_ERROR},
     };
 
     /*
@@ -472,8 +500,14 @@ void    cleanup_post_jail(char *unused_name, char **unused_argv)
     /*
      * From: header formatting.
      */
-    if ((hfrom_format_code = name_code(hfrom_format_table,
-				NAME_CODE_FLAG_NONE, var_hfrom_format)) < 0)
-	msg_fatal("invalid setting: %s = %s",
-		  VAR_HFROM_FORMAT, var_hfrom_format);
+    cleanup_hfrom_format = hfrom_format_parse(VAR_HFROM_FORMAT, var_hfrom_format);
+
+    /*
+     * Garbage after message header.
+     */
+    if ((cleanup_non_empty_eoh_action =
+	 name_code(non_empty_eoh_actions, NAME_CODE_FLAG_NONE,
+		   var_non_empty_eoh_action)) == NON_EMPTY_EOH_CODE_ERROR)
+	msg_fatal("bad %s value: '%s'", VAR_NON_EMPTY_EOH_ACTION,
+		  var_non_empty_eoh_action);
 }

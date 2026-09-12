@@ -103,6 +103,7 @@
 #include <post_mail.h>
 #include <mail_error.h>
 #include <smtp_reply_footer.h>
+#include <hfrom_format.h>
 
 /* Application-specific. */
 
@@ -111,8 +112,9 @@
 #include "smtpd_chat.h"
 
  /*
-  * Reject footer.
+  * Reject filter and footer maps.
   */
+static MAPS *smtpd_reject_filter_maps;
 static MAPS *smtpd_rej_ftr_maps;
 
 #define STR	vstring_str
@@ -126,6 +128,14 @@ void    smtpd_chat_pre_jail_init(void)
 
     if (init_count++ != 0)
 	msg_panic("smtpd_chat_pre_jail_init: multiple calls");
+
+    /*
+     * SMTP server reject filter.
+     */
+    if (*var_smtpd_reject_filter_maps)
+	smtpd_reject_filter_maps = maps_create(VAR_SMTPD_REJECT_FILTER_MAPS,
+					       var_smtpd_reject_filter_maps,
+					       DICT_FLAG_LOCK);
 
     /*
      * SMTP server reject footer.
@@ -205,7 +215,9 @@ void    vsmtpd_chat_reply(SMTPD_STATE *state, const char *format, va_list ap)
     char   *cp;
     char   *next;
     char   *end;
+    const char *alt_reply;
     const char *footer;
+    ssize_t line_len;			/* 202607 OpenAI line length checks */
 
     /*
      * Slow down clients that make errors. Sleep-on-anything slows down
@@ -214,8 +226,30 @@ void    vsmtpd_chat_reply(SMTPD_STATE *state, const char *format, va_list ap)
     if (state->error_count >= var_smtpd_soft_erlim)
 	sleep(delay = var_smtpd_err_sleep);
 
+    /*
+     * Postfix generates single-line reject responses, but Milters may
+     * generate multi-line rejects with the SMFIR_REPLYCODE request.
+     */
     vstring_vsprintf(state->buffer, format, ap);
+    cp = STR(state->buffer);
+    if ((*cp == '4' || *cp == '5')
+	&& smtpd_reject_filter_maps != 0
+	&& (alt_reply = maps_find(smtpd_reject_filter_maps, cp, 0)) != 0) {
+	const char *queue_id = state->queue_id ? state->queue_id : "NOQUEUE";
 
+	/* XXX Enforce this for each line of a multi-line reply. */
+	if ((alt_reply[0] != '4' && alt_reply[0] != '5')
+	    || !ISDIGIT(alt_reply[1]) || !ISDIGIT(alt_reply[2])
+	    || (alt_reply[3] != ' ' && alt_reply[3] != '-')
+	    || (ISDIGIT(alt_reply[4]) && (alt_reply[4] != alt_reply[0]))) {
+	    msg_warn("%s: ignoring invalid reject filter result: %s",
+		     queue_id, alt_reply);
+	} else {
+	    msg_info("%s: reply filter in: %s", queue_id, cp);
+	    msg_info("%s: reply filter out: %s", queue_id, alt_reply);
+	    vstring_strcpy(state->buffer, alt_reply);
+	}
+    }
     if ((*(cp = STR(state->buffer)) == '4' || *cp == '5')
 	&& ((smtpd_rej_ftr_maps != 0
 	     && (footer = maps_find(smtpd_rej_ftr_maps, cp, 0)) != 0)
@@ -225,20 +259,26 @@ void    vsmtpd_chat_reply(SMTPD_STATE *state, const char *format, va_list ap)
 
     /* All 5xx replies must have a 5.xx.xx detail code. */
     for (cp = STR(state->buffer), end = cp + strlen(STR(state->buffer));;) {
+	if ((next = strstr(cp, "\r\n")) != 0)
+	    line_len = next - cp;
+	else
+	    line_len = end - cp;
 	if (var_soft_bounce) {
-	    if (cp[0] == '5') {
+	    if (line_len > 0 && cp[0] == '5') {
 		cp[0] = '4';
-		if (cp[4] == '5')
+		if (line_len > 4 && cp[4] == '5')
 		    cp[4] = '4';
 	    }
 	}
 	/* This is why we use strlen() above instead of VSTRING_LEN(). */
-	if ((next = strstr(cp, "\r\n")) != 0) {
+	if (next != 0) {
 	    *next = 0;
-	    if (next[2] != 0)
-		cp[3] = '-';			/* contact footer kludge */
-	    else
+	    if (next[2] != 0) {
+		if (line_len > 3)
+		    cp[3] = '-';		/* contact footer kludge */
+	    } else {
 		next = end;			/* strip trailing \r\n */
+	    }
 	} else {
 	    next = end;
 	}
@@ -247,7 +287,7 @@ void    vsmtpd_chat_reply(SMTPD_STATE *state, const char *format, va_list ap)
 	if (msg_verbose)
 	    msg_info("> %s: %s", state->namaddr, cp);
 
-	smtp_fputs(cp, next - cp, state->client);
+	smtp_fputs(cp, line_len, state->client);
 	if (next < end)
 	    cp = next + 2;
 	else
@@ -316,16 +356,23 @@ void    smtpd_chat_notify(SMTPD_STATE *state)
 #define INDENT	4
 
     notice = post_mail_fopen_nowait(mail_addr_double_bounce(),
-				    var_error_rcpt,
+				    (state->error_mask & MAIL_ERROR_BOUNCE) ?
+				    var_bounce_rcpt : var_error_rcpt,
 				    MAIL_SRC_MASK_NOTIFY, NULL_TRACE_FLAGS,
 				    SMTPUTF8_FLAG_NONE, NO_QUEUE_ID);
     if (notice == 0) {
 	msg_warn("postmaster notify: %m");
 	return;
     }
-    post_mail_fprintf(notice, "From: %s (Mail Delivery System)",
-		      mail_addr_mail_daemon());
-    post_mail_fprintf(notice, "To: %s (Postmaster)", var_error_rcpt);
+    if (smtpd_hfrom_format == HFROM_FORMAT_CODE_STD) {
+	post_mail_fprintf(notice, "From: Mail Delivery System <%s>",
+			  mail_addr_mail_daemon());
+	post_mail_fprintf(notice, "To: Postmaster <%s>", var_error_rcpt);
+    } else {
+	post_mail_fprintf(notice, "From: %s (Mail Delivery System)",
+			  mail_addr_mail_daemon());
+	post_mail_fprintf(notice, "To: %s (Postmaster)", var_error_rcpt);
+    }
     post_mail_fprintf(notice, "Subject: %s SMTP server: errors from %s",
 		      var_mail_name, state->namaddr);
     post_mail_fputs(notice, "");

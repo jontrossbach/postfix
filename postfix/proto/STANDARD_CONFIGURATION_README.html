@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix Standard Configuration Examples</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -65,7 +66,7 @@ Internet hostname</a>
 <p> Postfix should work out of the box without change on a stand-alone
 machine that has direct Internet access.  At least, that is how
 Postfix installs when you download the Postfix source code via
-http://www.postfix.org/. </p>
+https://www.postfix.org/. </p>
 
 <p> You can use the command "<b>postconf -n</b>" to find out what
 settings are overruled by your main.cf. Besides a few pathname
@@ -168,7 +169,7 @@ at their default settings. </p>
 
 <p> First we present the non-mailhost configuration, because it is
 the simpler one. This machine sends mail as "user@example.com" and
-is final destination for "user@hostname.example.com". </p>
+is the final destination for "user@hostname.example.com". </p>
 
 <blockquote>
 <pre>
@@ -198,7 +199,7 @@ a firewall</a>". </p>
 </ul>
 
 <p> Next we present the mailhost configuration.  This machine sends
-mail as "user@example.com" and is final destination for
+mail as "user@example.com" and is the final destination for
 "user@hostname.example.com" as well as "user@example.com". </p>
 
 <blockquote>
@@ -325,7 +326,7 @@ All the mail to these two accounts is forwarded to an inside address.
 <blockquote>
 <pre>
 1 /etc/postfix/main.cf:
-2     virtual_alias_maps = hash:/etc/postfix/virtual
+2     virtual_alias_maps = lmdb:/etc/postfix/virtual
 3 
 4 /etc/postfix/virtual:
 5     postmaster      postmaster@example.com
@@ -341,7 +342,7 @@ All the mail to these two accounts is forwarded to an inside address.
 only address literals matching $inet_interfaces or $proxy_interfaces
 are deemed local.  So "localpart@[a.d.d.r]" can be matched as simply
 "localpart" in canonical(5) and virtual(5). This avoids the need to
-specify firewall IP addresses into Postfix configuration files. </p>
+specify firewall IP addresses in Postfix configuration files. </p>
 
 </ul>
 
@@ -368,8 +369,8 @@ is the real purpose of the firewall email function. </p>
  9b        permit_mynetworks reject_unauth_destination
 10b        ...spam blocking rules....
 <br>
-11     relay_recipient_maps = hash:/etc/postfix/relay_recipients
-12     transport_maps = hash:/etc/postfix/transport
+11     relay_recipient_maps = lmdb:/etc/postfix/relay_recipients
+12     transport_maps = lmdb:/etc/postfix/transport
 13 
 14 /etc/postfix/relay_recipients:
 15     user1@example.com   x
@@ -377,7 +378,7 @@ is the real purpose of the firewall email function. </p>
 17      . . .
 18 
 19 /etc/postfix/transport:
-20     example.com   smtp:[inside-gateway.example.com]
+20     example.com   relay:[inside-gateway.example.com]
 </pre>
 </blockquote>
 
@@ -399,25 +400,42 @@ wild-card in the relay_recipients table. </p>
 
 <li> <p> Lines 12, 19-20: Route mail for "example.com" to the inside
 gateway machine. The <tt>[]</tt> forces Postfix to do no MX lookup.
-</p>
+This uses the "relay" delivery transport (a copy of the default
+"smtp" delivery transport) to forward inbound mail. This can improve
+performance of deliveries to internal domains because they will
+compete for SMTP clients from the "relay" delivery transport, instead
+of competing with other SMTP deliveries for SMTP clients from the
+default "smtp" delivery transport. </p>
 
 </ul>
 
-<p>Specify <b>dbm</b> instead of <b>hash</b> if your system uses
-<b>dbm</b> files instead of <b>db</b> files. To find out what lookup
-tables Postfix supports, use the command "<b>postconf -m</b>".  </p>
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
+
+<p> Execute the command "<b>postmap /etc/postfix/virtual</b>"
+whenever you change the virtual file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/virtual</b>"
+to specify an explicit type. </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <p> Execute the command "<b>postmap /etc/postfix/relay_recipients</b>"
-whenever you change the relay_recipients table. </p>
+whenever you change the relay_recipients file, to (re)build a
+default-type indexed file. Execute "<b>postmap
+<i>type</i>:/etc/postfix/relay_recipients</b>" to specify an explicit
+type.</p>
 
 <p> Execute the command "<b>postmap /etc/postfix/transport</b>"
-whenever you change the transport table. </p>
+whenever you change the transport file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/transport</b>"
+to specify an explicit type. </p>
 
 <p> In some installations, there may be separate instances of Postfix
 processing inbound and outbound mail on a multi-homed firewall. The
 inbound Postfix instance has an SMTP server listening on the external
 firewall interface, and the outbound Postfix instance has an SMTP server
-listening on the internal interface. In such a configuration is it is
+listening on the internal interface. In such a configuration it is
 tempting to configure $inet_interfaces in each instance with just the
 corresponding interface address. </p>
 
@@ -441,7 +459,7 @@ follows:  </p>
 <blockquote>
 <pre>
 1 /etc/postfix/main.cf:
-2     virtual_alias_maps = hash:/etc/postfix/virtual
+2     virtual_alias_maps = lmdb:/etc/postfix/virtual
 3 
 4 /etc/postfix/virtual:
 5     root     root@localhost
@@ -460,8 +478,16 @@ matches $inet_interfaces or $proxy_interfaces. </p>
 
 </ul>
 
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
+
 <p> Execute the command "<b>postmap /etc/postfix/virtual</b>" after
-editing the file. </p>
+editing the virtual file, to (re)build a default-type indexed file.
+Execute "<b>postmap <i>type</i>:/etc/postfix/virtual</b>" to specify
+an explicit type. </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <h2><a name="intranet">Running Postfix behind a firewall</a></h2>
 
@@ -478,12 +504,12 @@ mail_version</b>". </p>
 
 <p> The following example presents additional configuration. You
 need to combine this with basic configuration information as
-discussed the first half of this document. </p>
+discussed in the first half of this document. </p>
 
 <blockquote>
 <pre>
  1 /etc/postfix/main.cf:
- 2     transport_maps = hash:/etc/postfix/transport
+ 2     transport_maps = lmdb:/etc/postfix/transport
  3     relayhost =
  4     # Optional for a machine that isn't "always on"
  5     #fallback_relay = [gateway.example.com]
@@ -516,17 +542,22 @@ directly, and gives undeliverable mail to a gateway.  </p>
 
 </ul>
 
-<p> Specify <b>dbm</b> instead of <b>hash</b> if your system uses
-<b>dbm</b> files instead of <b>db</b> files. To find out what lookup
-tables Postfix supports, use the command "<b>postconf -m</b>". </p>
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
 
-<p> Execute the command "<b>postmap /etc/postfix/transport</b>" whenever
-you edit the transport table. </p>
+<p> Execute the command "<b>postmap /etc/postfix/transport</b>"
+whenever you edit the transport file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/transport</b>"
+to specify an explicit type. </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
+
 
 <h2><a name="backup">Configuring Postfix as primary or backup MX host for a remote site</a></h2>
 
 <p> This section presents additional configuration. You need to
-combine this with basic configuration information as discussed the
+combine this with basic configuration information as discussed in the
 first half of this document. </p>
 
 <p> When your system is SECONDARY MX host for a remote site this
@@ -555,7 +586,7 @@ is all you need: </p>
 11     # You must specify your NAT/proxy external address.
 12     #proxy_interfaces = 1.2.3.4
 13 
-14     relay_recipient_maps = hash:/etc/postfix/relay_recipients
+14     relay_recipient_maps = lmdb:/etc/postfix/relay_recipients
 15 
 16 /etc/postfix/relay_recipients:
 17     user1@the.backed-up.domain.tld   x
@@ -570,7 +601,7 @@ need the above, plus: </p>
 <blockquote>
 <pre>
 20 /etc/postfix/main.cf:
-21     transport_maps = hash:/etc/postfix/transport
+21     transport_maps = lmdb:/etc/postfix/transport
 22 
 23 /etc/postfix/transport:
 24     the.backed-up.domain.tld       relay:[their.mail.host.tld]
@@ -607,12 +638,22 @@ relay_recipients table. </p>
 
 </ul>
 
-<p> Specify <b>dbm</b> instead of <b>hash</b> if your system uses
-<b>dbm</b> files instead of <b>db</b> files. To find out what lookup
-tables Postfix supports, use the command "<b>postconf -m</b>". </p>
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
+
+<p> Execute the command "<b>postmap /etc/postfix/relay_recipients</b>"
+whenever you change the relay_recipients file, to (re)build a
+default-type indexed file. Execute "<b>postmap
+<i>type</i>:/etc/postfix/relay_recipients</b>" to specify an explicit
+type. </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <p> Execute the command "<b>postmap /etc/postfix/transport</b>"
-whenever you change the transport table. </p>
+whenever you change the transport file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/transport</b>"
+to specify an explicit type. </p>
 
 <p> NOTE for Postfix &lt; 2.2: Do not use the fallback_relay feature
 when relaying mail
@@ -642,7 +683,7 @@ of the time. For dialup connections that are up 24x7, see the <a
 href="#local_network">local area network</a> section above.  </p>
 
 <p> This section presents additional configuration. You need to
-combine this with basic configuration information as discussed the
+combine this with basic configuration information as discussed in the
 first half of this document. </p>
 
 <p> If you do not have your own hostname and IP address (usually
@@ -749,12 +790,12 @@ send mail between users on the same machine. </p>
 
 <p> The following example presents additional configuration. You
 need to combine this with basic configuration information as
-discussed the first half of this document. </p>
+discussed in the first half of this document. </p>
 
 <blockquote>
 <pre>
 1 /etc/postfix/main.cf:
-2     smtp_generic_maps = hash:/etc/postfix/generic
+2     smtp_generic_maps = lmdb:/etc/postfix/generic
 3 
 4 /etc/postfix/generic:
 5     his@localdomain.local             hisaccount@hisisp.example
@@ -779,12 +820,16 @@ that the ISP supports "+" style address extensions). </p>
 
 </ul>
 
-<p>Specify <b>dbm</b> instead of <b>hash</b> if your system uses
-<b>dbm</b> files instead of <b>db</b> files. To find out what lookup
-tables Postfix supports, use the command "<b>postconf -m</b>".  </p>
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
 
 <p> Execute the command "<b>postmap /etc/postfix/generic</b>"
-whenever you change the generic table. </p>
+whenever you change the generic file, to (re)build a default-type
+indexed file. Execute  "<b>postmap <i>type</i>:/etc/postfix/generic</b>"
+to specify an explicit type.</p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <h3>Solution 2: Postfix version 2.1 and earlier </h3>
 
@@ -797,7 +842,7 @@ address of their own.</p>
 
 <p> The following example presents additional configuration. You
 need to combine this with basic configuration information as
-discussed the first half of this document. </p>
+discussed in the first half of this document. </p>
 
 <blockquote>
 <pre>
@@ -805,9 +850,9 @@ discussed the first half of this document. </p>
  2     myhostname = hostname.localdomain
  3     mydomain = localdomain
  4 
- 5     canonical_maps = hash:/etc/postfix/canonical
+ 5     canonical_maps = lmdb:/etc/postfix/canonical
  6 
- 7     virtual_alias_maps = hash:/etc/postfix/virtual
+ 7     virtual_alias_maps = lmdb:/etc/postfix/virtual
  8 
  9 /etc/postfix/canonical:
 10     your-login-name    your-account@your-isp.com
@@ -836,15 +881,21 @@ but is convenient.
 
 </ul>
 
-<p>Specify <b>dbm</b> instead of <b>hash</b> if your system uses
-<b>dbm</b> files instead of <b>db</b> files. To find out what lookup
-tables Postfix supports, use the command "<b>postconf -m</b>".  </p>
+<p> Instead of lmdb:, some systems use cdb:, hash:, or dbm:. </p>
 
 <p> Execute the command "<b>postmap /etc/postfix/canonical</b>"
-whenever you change the canonical table. </p>
+whenever you change the canonical file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/canonical</b>"
+to specify an explicit type. </p>
+
+<p> The default indexed file type is configured with the
+default_database_type parameter. To list available explicit types, 
+execute the command "<b>postconf -m</b>".</p>
 
 <p> Execute the command "<b>postmap /etc/postfix/virtual</b>"
-whenever you change the virtual table. </p>
+whenever you change the virtual file, to (re)build a default-type
+indexed file. Execute "<b>postmap <i>type</i>:/etc/postfix/virtual</b>"
+to specify an explicit type. </p>
 
 </body>
 

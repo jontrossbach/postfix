@@ -30,7 +30,7 @@ stat=1 result=
 unknown: warning: "==" or "!="" or "<"" or "<="" or ">="" or ">" expected at: "...$name1}>>>? {name 1 defined, |"
 stat=1 result=
 << ${x{$name1} != {}?{name 1 defined, |$name1|$name2|}}
-unknown: warning: attribute name syntax error at: "...x>>>{$name1} != {}?{name"
+unknown: warning: unexpected input at: "...$name1}>>>!= {}?{name 1 define"
 stat=1 result=
 << ${{$name1}x?{name 1 defined, |$name1|$name2|}}
 unknown: warning: "==" or "!="" or "<"" or "<="" or ">="" or ">" expected at: "...$name1}>>>x?{name 1 defined, |"
@@ -185,3 +185,48 @@ stat=0 result=true
 stat=0 result=
 << ${{a} >  {b}}
 stat=0 result=
+<< 
+
+<< name1 = foo
+<< 
+<< ${{$name1} >=blah {bar}}
+unknown: warning: bad operator suffix at: "...>=>>>blah"
+stat=1 result=
+<< ${{aaa} == {bbb}}
+stat=0 result=
+<< ${{aaa} ==length {bbb}}
+stat=0 result=true
+<< ${{aaa} <=length {bbb}}
+stat=0 result=true
+<< ${{aaa} >=length {bbb}}
+stat=0 result=true
+<< ${{aaa} != {bbb}}
+stat=0 result=true
+<< ${{aaa} !=length {bbb}}
+stat=0 result=
+<< ${{aaa} > {bb}}
+stat=0 result=
+<< ${{aaa} >length {bb}}
+stat=0 result=true
+<< ${{aaa} >= {bb}}
+stat=0 result=
+<< ${{aaa} >=length {bb}}
+stat=0 result=true
+<< ${{aaa} < {bb}}
+stat=0 result=true
+<< ${{aaa} <length {bb}}
+stat=0 result=
+<< ${{aaa} <= {bb}}
+stat=0 result=true
+<< ${{aaa} <=length {bb}}
+stat=0 result=
+<< 
+
+<< name1 = whatever
+<< 
+<< ${ test_named_fn { ABCBA } }
+stat=0 result=-=oOABCBAOo=-
+<< ${test_named_fn{AB%BA}}
+stat=0 result=-=oOAB%BAOo=-
+<< $bogus{AB%BA}
+stat=2 result={AB%BA}

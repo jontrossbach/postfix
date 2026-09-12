@@ -75,7 +75,7 @@ filtering, or address mapping.
 Preliminary SMTPUTF8 support is introduced with Postfix 3.0.
 .IP "\fBsmtputf8_enable (yes)\fR"
 Enable preliminary SMTPUTF8 support for the protocols described
-in RFC 6531..6533.
+in RFC 6531, RFC 6532, and RFC 6533.
 .IP "\fBsmtputf8_autodetect_classes (sendmail, verify)\fR"
 Detect that a message requires SMTPUTF8 support for the specified
 mail origin classes.
@@ -106,12 +106,13 @@ The time limit for sending or receiving information over the network.
 .ad
 .fi
 .IP "\fBdebug_peer_level (2)\fR"
-The increment in verbose logging level when a remote client or
-server matches a pattern in the debug_peer_list parameter.
+The increment in verbose logging level when a nexthop destination,
+remote client or server name or network address matches a pattern
+given with the debug_peer_list parameter.
 .IP "\fBdebug_peer_list (empty)\fR"
-Optional list of remote client or server hostname or network
-address patterns that cause the verbose logging level to increase
-by the amount specified in $debug_peer_level.
+Optional list of nexthop destination, remote client or server
+name or network address patterns that, if matched, cause the verbose
+logging level to increase by the amount specified in $debug_peer_level.
 .IP "\fBsoft_bounce (no)\fR"
 Safety net to keep mail queued that would otherwise be returned to
 the sender.
@@ -172,7 +173,7 @@ The master.cf service name of a Postfix daemon process.
 .SH "SEE ALSO"
 .na
 .nf
-http://cr.yp.to/proto/qmqp.html, QMQP protocol
+https://cr.yp.to/proto/qmqp.html, QMQP protocol
 cleanup(8), message canonicalization
 master(8), process manager
 postlogd(8), Postfix logging

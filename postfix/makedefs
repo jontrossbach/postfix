@@ -35,6 +35,7 @@
 #	Specifies one or more non-default object libraries. Postfix
 #	3.0 and later specify some of their database library
 #	dependencies with AUXLIBS_CDB, AUXLIBS_LDAP, AUXLIBS_LMDB,
+#	AUXLIBS_MONGODB,
 #	AUXLIBS_MYSQL, AUXLIBS_PCRE, AUXLIBS_PGSQL, AUXLIBS_SDBM,
 #	and AUXLIBS_SQLITE, respectively.
 # .IP \fBCC=\fIcompiler_command\fR
@@ -45,6 +46,8 @@
 #	\fIinclude\fR directory.
 #	The following directives are special:
 # .RS
+# .IP \fB-DNO_CLOSEFROM\fR
+#	Do not use the system closefom() implementation.
 # .IP \fB-DNO_DB\fR
 #	Do not build with Berkeley DB support.
 # .IP \fB-DNO_DEVPOLL\fR
@@ -60,7 +63,8 @@
 #	are known to support it.
 # .IP \fB-DNO_EAI\fR
 #	Do not build with EAI (SMTPUTF8) support. By default, EAI
-#	support is compiled in when the "pkg-config" command is
+#	support is compiled in when the "pkgconf" or "pkg-config"
+#	command are
 #	found, or the deprecated "icu-config" command.
 # .IP \fB-DNO_INLINE\fR
 #	Do not require support for C99 "inline" functions. Instead,
@@ -90,8 +94,8 @@
 #	is unavailable on some recent Solaris distributions.
 # .IP \fB-DNO_PCRE\fR
 #	Do not build with PCRE support.
-#	By default, PCRE support is compiled in when the \fBpcre-config\fR
-#	utility is installed.
+#	By default, PCRE support is compiled in when the \fBpcre2-config\fR
+#	or \fBpcre-config\fR utility are installed.
 # .IP \fB-DNO_POSIX_GETPW_R\fR
 #	Disable support for POSIX getpwnam_r/getpwuid_r.
 # .IP \fB-DNO_RES_NCALLS\fR
@@ -103,6 +107,10 @@
 # .IP \fB-DNO_SNPRINTF\fR
 #	Use sprintf() instead of snprintf(). By default, Postfix
 #	uses snprintf() except on ancient systems.
+# .IP \fB-DNO_STDBOOL\fR
+#	Don't use <stdbool.h>. This is usually auto-detected.
+# .IP \fB-DNO_TLS_TRACE\fR
+#	Build without OpenSSL 3 (and later) debug trace support.
 # .RE
 # .IP \fBDEBUG=\fIdebug_level\fR
 #	Specifies a non-default debugging level. The default is \fB-g\fR.
@@ -156,10 +164,10 @@
 #	supported in this context:
 #
 #	command_directory config_directory daemon_directory
-#	data_directory default_database_type html_directory
-#	mail_spool_directory mailq_path manpage_directory meta_directory
-#	newaliases_path queue_directory readme_directory sendmail_path
-#	shlib_directory openssl_path
+#	data_directory default_cache_db_type default_database_type
+#	html_directory mail_spool_directory mailq_path manpage_directory
+#	meta_directory newaliases_path queue_directory readme_directory
+#	sendmail_path shlib_directory openssl_path
 #
 #	See the postconf(5) manpage for a description of these
 #	parameters.
@@ -184,13 +192,42 @@
 #	New York, NY 10011, USA
 #--
 
+# Override all LC_* settings and LANG for reproducibility.
+LC_ALL=C; export LC_ALL
+
+# By now all shells must have functions.
+
+error() {
+   # Alas, tput(1) is not portable so we can't use visual effects.
+   echo "ATTENTION:" 1>&2;
+   echo "ATTENTION:" $* 1>&2;
+   echo "ATTENTION:" 1>&2;
+   exit 1
+}
+
+# First, deal with unsupported usage.
+case "$LD_LIBRARY_PATH" in
+?*) error "Not supported: building with LD_LIBRARY_PATH";;
+esac
+
+env | grep '^AUXLIBS_' | while read line
+do
+    case  "$line" in
+*-lpostfix-*) error "Not supported: linking plugins with -lpostfix-*: $line";;
+    esac
+done || exit 1
+
+# Suggest a fix for systems without grep -E or -F flags.
+(echo foo | grep -E foo 2>/dev/null | grep -F foo >/dev/null 2>/dev/null) || 
+    error "No grep -[EF] support. See auxiliary/fix-grep for a conversion tool."
+
 # Emit system-dependent Makefile macro definitions to standard output.
 
 echo "#----------------------------------------------------------------"
 echo "# Start of summary of user-configurable 'make makefiles' options."
 echo "# CCARGS=$CCARGS"
 echo "# AUXLIBS=$AUXLIBS"
-env | grep '^AUXLIBS_' | sed 's/^/# /'
+env | grep '^AUXLIBS_' | sed 's/^/# /' | sort
 echo "# shared=$shared"
 echo "# dynamicmaps=$dynamicmaps"
 echo "# pie=$pie"
@@ -205,22 +242,10 @@ ARFL=rv
 # Ugly function to make our error message more visible among the
 # garbage that is output by some versions of make(1).
 
-# By now all shells must have functions.
-
-error() {
-   # Alas, tput(1) is not portable so we can't use visual effects.
-   echo "ATTENTION:" 1>&2;
-   echo "ATTENTION:" $* 1>&2;
-   echo "ATTENTION:" 1>&2;
-   exit 1
-}
-
 case $# in
  # Officially supported usage.
  0) SYSTEM=`(uname -s) 2>/dev/null`
     RELEASE=`(uname -r) 2>/dev/null`
-    # No ${x%%y} support in Solaris 11 /bin/sh
-    RELEASE_MAJOR=`expr "$RELEASE" : '\([0-9]*\)'` || exit 1
     VERSION=`(uname -v) 2>/dev/null`
     case "$VERSION" in
      dcosx*) SYSTEM=$VERSION;;
@@ -230,18 +255,8 @@ case $# in
  *) echo usage: $0 [system release] 1>&2; exit 1;;
 esac
 
-case "$SYSTEM" in
- Linux)
-    case "`PATH=/bin:/usr/bin ldd /bin/sh`" in
-     *-musl-*)
-	case "$CCARGS" in
-	 *-DNO_DNSSEC*) ;;
-	 *) echo Warning: libc-musl breaks DANE/TLSA security. 1>&2
-	    echo This build will not support DANE/TLSA. 1>&2
-	    CCARGS="$CCARGS -DNO_DNSSEC";;
-	esac;;
-    esac;;
-esac
+# No ${x%%y} support in Solaris 11 /bin/sh
+RELEASE_MAJOR=`echo "$RELEASE" | sed 's/[^0-9].*//'` || exit 1
 
 case "$SYSTEM.$RELEASE" in
    SCO_SV.3.2)	SYSTYPE=SCO5
@@ -267,19 +282,9 @@ case "$SYSTEM.$RELEASE" in
 	      *) error "Seems to be UnixWare`uname -v`. Untested.";;
 		esac
 		;;
-  FreeBSD.2*)	SYSTYPE=FREEBSD2
+FreeBSD.[2-7].*) SYSTYPE=FREEBSD$RELEASE_MAJOR
 		;;
-  FreeBSD.3*)	SYSTYPE=FREEBSD3
-		;;
-  FreeBSD.4*)	SYSTYPE=FREEBSD4
-		;;
-  FreeBSD.5*)	SYSTYPE=FREEBSD5
-		;;
-  FreeBSD.6*)	SYSTYPE=FREEBSD6
-		;;
-  FreeBSD.7*)	SYSTYPE=FREEBSD7
-		;;
-  FreeBSD.8*)	SYSTYPE=FREEBSD8
+FreeBSD.[89].*)	SYSTYPE=FREEBSD$RELEASE_MAJOR
 		: ${SHLIB_SUFFIX=.so}
 		: ${SHLIB_CFLAGS=-fPIC}
 		: ${SHLIB_LD="${CC-gcc} -shared"' -Wl,-soname,${LIB}'}
@@ -287,33 +292,7 @@ case "$SYSTEM.$RELEASE" in
 		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
 		: ${PLUGIN_LD="${CC-gcc} -shared"}
 		;;
-  FreeBSD.9*)	SYSTYPE=FREEBSD9
-		: ${SHLIB_SUFFIX=.so}
-		: ${SHLIB_CFLAGS=-fPIC}
-		: ${SHLIB_LD="${CC-gcc} -shared"' -Wl,-soname,${LIB}'}
-		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
-		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
-		: ${PLUGIN_LD="${CC-gcc} -shared"}
-		;;
-  FreeBSD.10*)	SYSTYPE=FREEBSD10
-		: ${CC=cc}
-		: ${SHLIB_SUFFIX=.so}
-		: ${SHLIB_CFLAGS=-fPIC}
-		: ${SHLIB_LD="${CC} -shared"' -Wl,-soname,${LIB}'}
-		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
-		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
-		: ${PLUGIN_LD="${CC} -shared"}
-		;;
-   FreeBSD.11*) SYSTYPE=FREEBSD11
-		: ${CC=cc}
-		: ${SHLIB_SUFFIX=.so}
-		: ${SHLIB_CFLAGS=-fPIC}
-		: ${SHLIB_LD="${CC} -shared"' -Wl,-soname,${LIB}'}
-		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
-		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
-		: ${PLUGIN_LD="${CC} -shared"}
-		;;
-   FreeBSD.12*) SYSTYPE=FREEBSD12
+  FreeBSD.*)	SYSTYPE=FREEBSD$RELEASE_MAJOR
 		: ${CC=cc}
 		: ${SHLIB_SUFFIX=.so}
 		: ${SHLIB_CFLAGS=-fPIC}
@@ -324,22 +303,9 @@ case "$SYSTEM.$RELEASE" in
 		;;
  DragonFly.*)	SYSTYPE=DRAGONFLY
 		;;
-  OpenBSD.2*)	SYSTYPE=OPENBSD2
+OpenBSD.[2-4].*) SYSTYPE=OPENBSD$RELEASE_MAJOR
 		;;
-  OpenBSD.3*)	SYSTYPE=OPENBSD3
-		;;
-  OpenBSD.4*)	SYSTYPE=OPENBSD4
-		;;
-  OpenBSD.5*)	SYSTYPE=OPENBSD5
-		: ${CC=cc}
-		: ${SHLIB_SUFFIX=.so.1.0}
-		: ${SHLIB_CFLAGS=-fPIC}
-		: ${SHLIB_LD="${CC} -shared"' -Wl,-soname,${LIB}'}
-		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
-		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
-		: ${PLUGIN_LD="${CC} -shared"}
-		;;
-  OpenBSD.6*)	SYSTYPE=OPENBSD6
+  OpenBSD.*)	SYSTYPE=OPENBSD$RELEASE_MAJOR
 		: ${CC=cc}
 		: ${SHLIB_SUFFIX=.so.1.0}
 		: ${SHLIB_CFLAGS=-fPIC}
@@ -350,25 +316,9 @@ case "$SYSTEM.$RELEASE" in
 		;;
   ekkoBSD.1*)	SYSTYPE=EKKOBSD1
 		;;
-   NetBSD.1*)	SYSTYPE=NETBSD1
+NetBSD.[1-5].*)	SYSTYPE=NETBSD$RELEASE_MAJOR
 		;;
-   NetBSD.2*)	SYSTYPE=NETBSD2
-		;;
-   NetBSD.3*)	SYSTYPE=NETBSD3
-		;;
-   NetBSD.4*)	SYSTYPE=NETBSD4
-		;;
-   NetBSD.5*)	SYSTYPE=NETBSD5
-		;;
-   NetBSD.6*)	SYSTYPE=NETBSD6
-		: ${SHLIB_SUFFIX=.so}
-		: ${SHLIB_CFLAGS=-fPIC}
-		: ${SHLIB_LD="${CC-gcc} -shared"' -Wl,-soname,${LIB}'}
-		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
-		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
-		: ${PLUGIN_LD="${CC-gcc} -shared"}
-               ;;
-   NetBSD.7*)  SYSTYPE=NETBSD7
+   NetBSD.*)	SYSTYPE=NETBSD$RELEASE_MAJOR
 		: ${SHLIB_SUFFIX=.so}
 		: ${SHLIB_CFLAGS=-fPIC}
 		: ${SHLIB_LD="${CC-gcc} -shared"' -Wl,-soname,${LIB}'}
@@ -390,10 +340,10 @@ case "$SYSTEM.$RELEASE" in
 		V[0-4].*) CCARGS="$CCARGS -DNO_IPV6";;
 		esac
 		;;
-    SunOS.4*)	SYSTYPE=SUNOS4
+    SunOS.4.*)	SYSTYPE=SUNOS4
 		SYSLIBS=-lresolv
 		;;
-    SunOS.5*)	SYSTYPE=SUNOS5
+    SunOS.5.*)	SYSTYPE=SUNOS5
 		RANLIB=echo
 		SYSLIBS="-lresolv -lsocket -lnsl -ldl"
 		: ${SHLIB_SUFFIX=.so}
@@ -434,10 +384,6 @@ case "$SYSTEM.$RELEASE" in
 		CCARGS="$CCARGS -Dstrcasecmp=fix_strcasecmp \
 		    -Dstrncasecmp=fix_strncasecmp"
 		STRCASE="strcasecmp.o"
-		# Avoid common types of braindamage
-		case "$LD_LIBRARY_PATH" in
-		?*) error "Don't set LD_LIBRARY_PATH";;
-		esac
 		case "${CC}" in
 		*" "*) ;;
 		*ucb*) error "Don't use /usr/ucb/cc or ucblib";;
@@ -494,14 +440,14 @@ case "$SYSTEM.$RELEASE" in
 		*)	error "Unknown AIX version: `uname -v`.";;
 		esac;;
 		# Tested with RedHat 3.03 on 20020729.
-    Linux.1*)	SYSTYPE=LINUX1
+    Linux.1.*)	SYSTYPE=LINUX1
 		case "$CCARGS" in
 		 *-DNO_DB*) ;;
 		 *-DHAS_DB*) ;;
 		 *) SYSLIBS="-ldb";;
 		esac
 		;;
-    Linux.2*)	SYSTYPE=LINUX2
+    Linux.2.*)	SYSTYPE=LINUX2
 		case "$CCARGS" in
 		 *-DNO_DB*) ;;
 		 *-DHAS_DB*) ;;
@@ -517,6 +463,7 @@ case "$SYSTEM.$RELEASE" in
 			# by including <db.h> and by linking with -ldb
 			echo "No <db.h> include file found." 1>&2
 			echo "Install the appropriate db*-devel package first." 1>&2
+			echo "Alternatively, build with CCARGS=\"-NO_DB ...\"" 1>&2
 			exit 1
 		    fi
 		    SYSLIBS="-ldb"
@@ -581,10 +528,12 @@ EOF
 		: ${SHLIB_ENV="LD_LIBRARY_PATH=`pwd`/lib"}
 		: ${PLUGIN_LD="${CC-gcc} -shared"}
 		;;
- Linux.[345].*)	SYSTYPE=LINUX$RELEASE_MAJOR
+    Linux.*)	SYSTYPE=LINUX$RELEASE_MAJOR
 		case "$CCARGS" in
 		 *-DNO_DB*) ;;
-		 *-DHAS_DB*) ;;
+		 *-DHAS_DB*) case "$AUXLIBS_DB" in
+			     "") AUXLIBS_DB=-ldb;;
+			     esac;;
 		 *) if [ -f /usr/include/db.h ]
 		    then
 			: we are all set
@@ -596,9 +545,11 @@ EOF
 			# by including <db.h> and by linking with -ldb
 			echo "No <db.h> include file found." 1>&2
 			echo "Install the appropriate db*-devel package first." 1>&2
+			echo "Alternatively, build with CCARGS=\"-NO_DB ...\"" 1>&2
+			echo "See: https://www.postfix.org/NON_BERKELEYDB_README.html#build-conf" 1>&2
 			exit 1
 		    fi
-		    SYSLIBS="-ldb"
+		    AUXLIBS_DB="-ldb"
 		    ;;
 		esac
 		for name in nsl resolv
@@ -634,9 +585,10 @@ EOF
 			# by including <db.h> and by linking with -ldb
 			echo "No <db.h> include file found." 1>&2
 			echo "Install the appropriate db*-devel package first." 1>&2
+			echo "Alternatively, build with CCARGS=\"-NO_DB ...\"" 1>&2
 			exit 1
 		    fi
-		    SYSLIBS="-ldb"
+		    AUXLIBS_DB="-ldb"
 		    ;;
 		esac
 		for name in nsl resolv
@@ -680,14 +632,14 @@ HP-UX.B.10.*)	SYSTYPE=HPUX10
 		CCARGS="$CCARGS -DNO_SNPRINTF"
 		if [ -f /usr/lib/libdb.a ]; then
 		    CCARGS="$CCARGS -DHAS_DB"
-		    SYSLIBS=-ldb
+		    AUXLIBS_DB=-ldb
 		fi
 		;;
 HP-UX.B.11.*)	SYSTYPE=HPUX11
 		SYSLIBS=-lnsl
 		if [ -f /usr/lib/libdb.a ]; then
 		    CCARGS="$CCARGS -DHAS_DB"
-		    SYSLIBS="$SYSLIBS -ldb"
+		    AUXLIBS_DB="-ldb"
 		fi
 		;;
 ReliantUNIX-?.5.43) SYSTYPE=ReliantUnix543
@@ -723,6 +675,12 @@ ReliantUNIX-?.5.43) SYSTYPE=ReliantUnix543
 		?.*|10.*) ;;
 		       *) SYSLIBS="$SYSLIBS -lresolv";;
 		esac
+		# Darwin 21 linker without additional coaxing complains about
+		# -Wl,-undefined,dynamic_lookup
+		case $RELEASE in
+		2[1-9].*|[3-9]?.*) NOFIXUP="-Wl,-no_fixup_chains ";;
+				*) NOFIXUP="";;
+		esac
 		# kqueue and/or poll are broken in MacOS X 10.5 (Darwin 9).
 		# kqueue works in Mac OS X 10.8 (Darwin 12).
 		case $RELEASE in
@@ -730,12 +688,12 @@ ReliantUNIX-?.5.43) SYSTYPE=ReliantUnix543
 		esac
 		: ${SHLIB_CFLAGS=-fPIC}
 		: ${SHLIB_SUFFIX=.dylib}
-		: ${SHLIB_LD='cc -shared -Wl,-flat_namespace -Wl,-undefined,dynamic_lookup -Wl,-install_name,@rpath/${LIB}'}
+		: ${SHLIB_LD="cc -shared -Wl,-flat_namespace ${NOFIXUP}-Wl,-undefined,dynamic_lookup "'-Wl,-install_name,@rpath/${LIB}'}
 		: ${SHLIB_RPATH='-Wl,-rpath,${SHLIB_DIR}'}
                 # In MacOS/X 10.11.x /bin/sh unsets DYLD_LIBRARY_PATH, so we
                 # have export it into postfix-install indirectly!
 		: ${SHLIB_ENV="DYLD_LIBRARY_PATH=`pwd`/lib SHLIB_ENV_VAR=DYLD_LIBRARY_PATH SHLIB_ENV_VAL=`pwd`/lib"}
-		: ${PLUGIN_LD='cc -shared -Wl,-flat_namespace -Wl,-undefined,dynamic_lookup'}
+		: ${PLUGIN_LD="cc -shared -Wl,-flat_namespace ${NOFIXUP}-Wl,-undefined,dynamic_lookup"}
 		;;
     dcosx.1*)	SYSTYPE=DCOSX1
 		RANLIB=echo
@@ -817,8 +775,10 @@ esac
 case "$CCARGS" in
 *-DNO_EAI*) CCARGS="$CCARGS "'-DDEF_SMTPUTF8_ENABLE=\"no\"';;
 	 *) icu_cppflags=`((pkg-config --cflags icu-uc icu-i18n) ||
+		  (pkgconf --cflags icu-uc icu-i18n) ||
 		  (icu-config --cppflags)) 2>/dev/null` && {
 		icu_ldflags=`((pkg-config --libs icu-uc icu-i18n) ||
+		  (pkgconf --libs icu-uc icu-i18n) ||
 		  (icu-config --ldflags)) 2>/dev/null` && {
 		    trap 'rm -f makedefs.test makedefs.test.[co]' 1 2 3 15
 		    cat >makedefs.test.c <<'EOF'
@@ -879,12 +839,33 @@ test -r /dev/urandom && CCARGS="$CCARGS -DHAS_DEV_URANDOM"
 case "$CCARGS" in
 *-DHAS_PCRE*)	;;
  *-DNO_PCRE*)	;;
-	   *)	pcre_cflags=`(pcre-config --cflags) 2>/dev/null` &&
-		    pcre_libs=`(pcre-config --libs) 2>/dev/null` && {
-			CCARGS="$CCARGS -DHAS_PCRE $pcre_cflags"
-			AUXLIBS_PCRE="$pcre_libs"
-		}
+	   *)	if pcre_cflags=`(pcre2-config --cflags) 2>/dev/null` &&
+		    pcre_libs=`(pcre2-config --libs8) 2>/dev/null` 
+		then
+		    CCARGS="$CCARGS -DHAS_PCRE=2 $pcre_cflags"
+		    AUXLIBS_PCRE="$pcre_libs"
+		elif pcre_cflags=`(pcre-config --cflags) 2>/dev/null` &&
+		    pcre_libs=`(pcre-config --libs) 2>/dev/null` 
+		then
+		    CCARGS="$CCARGS -DHAS_PCRE=1 $pcre_cflags"
+		    AUXLIBS_PCRE="$pcre_libs"
+		fi
 		;;
+esac
+
+# C23 introduces a new built-in type 'bool' which breaks past Postfix
+# practice. Other compilers provide emulation. Don't try to guess where
+# the compiler hides <stbool.h>.
+case "$CCARGS" in
+ *-DNO_STDBOOL*) ;;
+ *) cat >makedefs.test.c <<'EOF'
+#include <stdbool.h>
+bool x;
+EOF
+    ${CC-gcc} -c makedefs.test.c >/dev/null 2>&1 ||
+	CCARGS="$CCARGS -DNO_STDBOOL"
+    rm -f makedefs.test.[co]
+    ;;
 esac
 
 # Defaults that can be overruled (make makefiles CC=cc OPT=-O6 DEBUG=)
@@ -906,7 +887,7 @@ CCARGS="$CCARGS -DSNAPSHOT"
 
 # Non-production: needs thorough testing, or major changes are still
 # needed before the code stabilizes.
-#CCARGS="$CCARGS -DNONPROD"
+#CCARGS="$CCARGS -DNONPROD='\"featurename-nonprod\"'"
 
 # Workaround: prepend Postfix include files before other include files.
 CCARGS="-I. -I../../include $CCARGS"
@@ -930,7 +911,7 @@ CCARGS="-I. -I../../include $CCARGS"
 # "make makefiles name=value...". The replacement depends on usage
 # context: the expanded release version in actual pathnames, or the
 # unexpanded ${mail_version} in configuration parameter values (both
-# main.cf and and built-in defaults).
+# main.cf and built-in defaults).
 
 # Helper function to determine DEF_MAIL_VERSION.
 
@@ -1034,9 +1015,10 @@ do
     esac
 done
 
+default_cache_db_type_macro=DEF_CACHE_DB_TYPE
 default_database_type_macro=DEF_DB_TYPE
 
-for parm_name in default_database_type
+for parm_name in default_cache_db_type default_database_type
 do
     eval parm_val=\"\$$parm_name\"
     eval parm_macro=\"\$${parm_name}_macro\"
@@ -1167,8 +1149,27 @@ ${WARN='-Wall -Wno-comment -Wformat -Wimplicit -Wmissing-prototypes \
 # and we don't try to figure out which awk versions have tolower().
 # The following was validated in 2014 on FreeBSD/Linux and Solaris 9.
 
+# But first, find out if sys_defs.h may contain '#define HAS_DB'.
+# Historically, this was how Postfix builds "knew" BDB was supported.
+trap 'rm -f makedefs.test makedefs.test.[co]' 0 1 2 3 15
+    cat >makedefs.test.c <<'EOF'
+#include "src/util/sys_defs.h"
+#include <stdio.h>
+int     main(void)
+{
+#ifdef HAS_DB
+    printf("-DHAS_DB\n");
+#endif 
+    return (0);
+}
+EOF
+eval ${CC-gcc} ${CCARGS} -D$SYSTYPE -o makedefs.test makedefs.test.c || exit 1
+HAS_DB=`./makedefs.test` || exit 1
+rm -f makedefs.test makedefs.test.[co]
+
 DEFINED_MAP_TYPES=`
-    echo $CCARGS | tr -cd '\- _ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' | 
+    echo $HAS_DB $CCARGS | sed 's/=[^ ]*//g' | 
+	tr -cd '\- _ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' | 
 	tr ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz | ${AWK} '
 	{ for (n = 1; n <= NF; n++)
 	      if ($n ~ /^-dhas_/)
@@ -1178,7 +1179,7 @@ DEFINED_MAP_TYPES=`
 
 # Propagate AUXLIBS_FOO or merge them into global AUXLIBS (i.e. SYSLIBS).
 
-PLUGGABLE_MAPS="CDB LDAP LMDB MYSQL PCRE PGSQL SDBM SQLITE"
+PLUGGABLE_MAPS="CDB DB LDAP LMDB MONGODB MYSQL PCRE PGSQL SDBM SQLITE"
 
 case "$dynamicmaps" in
 yes) for name in $PLUGGABLE_MAPS
@@ -1231,6 +1232,80 @@ do
     done; exit 1) || error "invalid option '$opt' in POSTFIX_INSTALL_OPTS"
 done
 
+# If -DNO_DB is specified then 'hash' and 'btree' will be unavailable.
+
+check_no_db_overrides()
+{
+    trap 'rm -f makedefs.test makedefs.test.[co]' 0 1 2 3 15
+        cat src/util/sys_defs.h >makedefs.test.c
+        cat >>makedefs.test.c <<'EOF'
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+int     main(void)
+{
+    struct def_info {
+	const char *mac_name;
+	const char *parm_name;
+	const char *def_type;
+	const char *problem;
+    };
+    struct def_info def_infos[] = {
+	{"DEF_DB_TYPE", "default_database_type", DEF_DB_TYPE},
+	{"DEF_CACHE_DB_TYPE", "default_cache_db_type", DEF_CACHE_DB_TYPE},
+    };
+    const char *bdb_types[] = {"hash", "btree"};
+    struct def_info *pdef_info;
+    const char *const * pbdb_type;
+    const char *three_bs = "\\\\\\";
+    int     status = 0;
+
+    for (pdef_info = def_infos; pdef_info < def_infos + 2; pdef_info++) {
+	for (pbdb_type = bdb_types; pbdb_type < bdb_types + 2; pbdb_type++) {
+	    if (strcmp(pdef_info->def_type, *pbdb_type) == 0) {
+		pdef_info->problem = *pbdb_type;
+		status = 1;
+	    }
+	}
+    }
+    if (status != 0) {
+	fprintf(stderr, "\nBuilding with -DNO_DB, but at least one default "
+		"setting still\nrequires 'hash' or 'btree':\n");
+	for (pdef_info = def_infos; pdef_info < def_infos + 2; pdef_info++) {
+	    if (pdef_info->problem) {
+		fprintf(stderr, "  %s=%s\n", pdef_info->parm_name,
+			pdef_info->problem);
+	    }
+	}
+	fprintf(stderr, "\nTo fix, specify types other than 'hash' or 'btree', "
+			"for example:\n  make makefiles ... \\\n    ");
+	for (pdef_info = def_infos; pdef_info < def_infos + 2; pdef_info++) {
+	    if (pdef_info->problem) {
+		fprintf(stderr, " %s=lmdb", pdef_info->parm_name);
+	    }
+	}
+	fprintf(stderr, " ...\n\nOr, using older syntax:\n");
+	fprintf(stderr, "  make makefiles ... \\\n    CCARGS=\"$CCARGS -DNO_DB");
+	for (pdef_info = def_infos; pdef_info < def_infos + 2; pdef_info++) {
+	    if (pdef_info->problem) {
+		fprintf(stderr, " -D%s=%s\"lmdb%s\"",
+			pdef_info->mac_name, three_bs, three_bs);
+	    }
+	}
+	fprintf(stderr, " ...\" ...\n\n");
+    }
+    exit(status);
+}
+EOF
+    eval ${CC-gcc} ${CCARGS} -D$SYSTYPE -o makedefs.test makedefs.test.c || exit 1
+    ./makedefs.test || exit 1
+    rm -f makedefs.test makedefs.test.[co]
+}
+
+case "$CCARGS" in
+ *-DNO_DB*) check_no_db_overrides || exit 1;;
+esac
+
 # Finally...
 
 sed 's/   */ /g' <<EOF
@@ -1249,6 +1324,7 @@ EXPORT	= CCARGS='$CCARGS' OPT='$OPT' DEBUG='$DEBUG'
 WARN	= $WARN
 DEFINED_MAP_TYPES = $DEFINED_MAP_TYPES
 MAKE_FIX = $MAKE_FIX
+BUILD_ROOT = `pwd`
 # Switch between Postfix static and dynamically-linked libraries.
 AR	= $AR
 RANLIB	= $RANLIB

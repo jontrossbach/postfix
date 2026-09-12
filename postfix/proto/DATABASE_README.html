@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix Lookup Table Overview</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -58,7 +59,7 @@ documentation: </p>
     alias_maps = hash:/etc/postfix/aliases            (local aliasing)
     header_checks = regexp:/etc/postfix/header_checks (content filtering)
     transport_maps = hash:/etc/postfix/transport      (routing table)
-    virtual_alias_maps = hash:/etc/postfix/virtual    (address rewriting)
+    virtual_alias_maps = hash:/etc/postfix/virtual    (virtual aliasing)
 </pre>
 </blockquote>
 
@@ -98,7 +99,7 @@ lookup key exists.  Any non-empty lookup result value may be used
 here: the lookup result is not used. Examples
 are the local_recipient_maps that determine what local recipients
 Postfix accepts in mail from the network, the mydestination parameter
-that specifies what domains Postfix delivers locally, or the
+that specifies what domains Postfix delivers locally for, or the
 mynetworks parameter that specifies the IP addresses of trusted
 clients or client networks.  Technically, these are lists, not
 tables. Despite the difference, Postfix lists are described here
@@ -292,6 +293,19 @@ databases are maintained by Postfix daemons. The lookup table name
 as used in "dbm:table" is the database file name without the ".dir"
 or ".pag" suffix.  </dd>
 
+<dt> <b>debug</b> </dt>
+
+<dd>
+<p> An adapter for another table that causes all accesses to be
+logged.  Example usage: "debug:hash:/etc/postfix/example".  The
+formats of the log messages are unspecified and subject to change.
+Warning: If a query or the underlying table contains sensitive
+information (such as a password), that information might be
+logged. </p>
+
+<p> This feature is available with Postfix 3.11 and later. </p>
+</dd>
+
 <dt> <b>environ</b> </dt>
 
 <dd> The UNIX process environment array. The lookup key is the
@@ -326,7 +340,7 @@ also the static: map type. </dd>
 
 <dt> <b>internal</b> </dt>
 
-<dd> A non-shared, in-memory hash table. Its content are lost when
+<dd> A non-shared, in-memory hash table. Its contents are lost when
 a process terminates. </dd>
 
 <dt> <b>lmdb</b> </dt>
@@ -347,6 +361,11 @@ ldap_table(5). </dd>
 
 <dd> Memcache database client. Configuration details are given in
 memcache_table(5). </dd>
+
+<dt> <b>mongodb</b> (read-only) </dt>
+
+<dd> MongoDB database client. Configuration details are given in
+mongodb_table(5), with examples in MONGODB_README. </dd>
 
 <dt> <b>mysql</b> (read-only) </dt>
 

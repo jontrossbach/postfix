@@ -78,6 +78,9 @@
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
 /*
+/*	Wietse Venema
+/*	porcupine.org
+/*
 /*	Pipelining code in cooperation with:
 /*	Jon Ribbens
 /*	Oaktree Internet Solutions Ltd.,
@@ -149,12 +152,17 @@
 #include <mail_addr_map.h>
 #include <ext_prop.h>
 #include <namadr_list.h>
-#include <match_parent_style.h>
 #include <lex_822.h>
 #include <dsn_mask.h>
 #include <xtext.h>
 #include <uxtext.h>
 #include <smtputf8.h>
+#if defined(USE_TLS) && defined(USE_TLSRPT)
+#include <tlsrpt_wrapper.h>
+#endif
+#ifdef USE_TLS
+#include <yana_policy.h>
+#endif
 
 /* Application-specific. */
 
@@ -337,7 +345,7 @@ int     smtp_helo(SMTP_STATE *state)
 	/* XXX Mix-up of per-session and per-request flags. */
 	state->misc_flags |= SMTP_MISC_FLAG_IN_STARTTLS;
 	smtp_stream_setup(state->session->stream, var_smtp_starttls_tmout,
-			  var_smtp_rec_deadline);
+			  var_smtp_req_deadline, 0);
 	tls_helo_status = smtp_start_tls(state);
 	state->misc_flags &= ~SMTP_MISC_FLAG_IN_STARTTLS;
 	return (tls_helo_status);
@@ -348,7 +356,7 @@ int     smtp_helo(SMTP_STATE *state)
      * Prepare for disaster.
      */
     smtp_stream_setup(state->session->stream, var_smtp_helo_tmout,
-		      var_smtp_rec_deadline);
+		      var_smtp_req_deadline, 0);
     if ((except = vstream_setjmp(state->session->stream)) != 0)
 	return (smtp_stream_except(state, except, where));
 
@@ -475,6 +483,11 @@ int     smtp_helo(SMTP_STATE *state)
 		else
 		    session->features &= ~SMTP_FEATURE_ESMTP;
 	    }
+#ifdef USE_TLSRPT
+	    if (state->tlsrpt
+		&& (state->misc_flags & SMTP_MISC_FLAG_IN_STARTTLS) == 0)
+		smtp_tlsrpt_set_ehlo_resp(state, resp->str);
+#endif
 	}
 	if ((session->features & SMTP_FEATURE_ESMTP) == 0) {
 	    where = "performing the HELO handshake";
@@ -484,6 +497,10 @@ int     smtp_helo(SMTP_STATE *state)
 				       "host %s refused to talk to me: %s",
 				       session->namaddr,
 				       translit(resp->str, "\n", " ")));
+#ifdef USE_TLSRPT
+	    if (state->tlsrpt)
+		trw_set_ehlo_resp(state->tlsrpt, resp->str);
+#endif
 	}
     } else {
 	where = "performing the LHLO handshake";
@@ -581,6 +598,7 @@ int     smtp_helo(SMTP_STATE *state)
 				msg_warn("bad EHLO SIZE limit \"%s\" from %s",
 					 word, session->namaddrport);
 			    else
+				/* We treat size_limit <= 0 as 'unknown'. */
 				session->size_limit = off_cvt_string(word);
 			}
 		    }
@@ -589,6 +607,10 @@ int     smtp_helo(SMTP_STATE *state)
 		    /* Ignored later if we already sent STARTTLS. */
 		    if ((discard_mask & EHLO_MASK_STARTTLS) == 0)
 			session->features |= SMTP_FEATURE_STARTTLS;
+		} else if (strcasecmp(word, "REQUIRETLS") == 0) {
+		    if ((discard_mask & EHLO_MASK_REQTLS) == 0
+			&& (state->misc_flags & SMTP_MISC_FLAG_IN_STARTTLS))
+			session->features |= SMTP_FEATURE_REQTLS;
 #endif
 #ifdef USE_SASL_AUTH
 		} else if (var_smtp_sasl_enable
@@ -612,45 +634,26 @@ int     smtp_helo(SMTP_STATE *state)
 		 session->features, (double) session->size_limit);
 
     /*
-     * Decide if this delivery requires SMTPUTF8 server support.
-     * 
-     * For now, we require that the remote SMTP server supports SMTPUTF8 when
-     * the sender requested SMTPUTF8 support.
-     * 
-     * XXX EAI Refine this to: the sender requested SMTPUTF8 support AND the
-     * delivery request involves at least one UTF-8 envelope address or
-     * header value.
-     * 
-     * If the sender requested SMTPUTF8 support but the delivery request
-     * involves no UTF-8 envelope address or header value, then we could
-     * still deliver such mail to a non-SMTPUTF8 server, except that we must
-     * either uxtext-encode ORCPT parameters or not send them. We cannot
-     * encode the ORCPT in xtext, because legacy SMTP requires that the
-     * unencoded address consist entirely of printable (graphic and white
-     * space) characters from the US-ASCII repertoire (RFC 3461 section 4). A
-     * correct uxtext encoder will produce a result that an xtext decoder
-     * will pass through unchanged.
-     * 
-     * XXX Should we try to encode headers with RFC 2047 when delivering to a
-     * non-SMTPUTF8 server? That could make life easier for mailing lists.
-     */
-#define DELIVERY_REQUIRES_SMTPUTF8 \
-	((request->smtputf8 & SMTPUTF8_FLAG_REQUESTED) \
-	&& (request->smtputf8 & ~SMTPUTF8_FLAG_REQUESTED))
-
-    /*
      * Require that the server supports SMTPUTF8 when delivery requires
      * SMTPUTF8.
      * 
      * Fix 20140706: moved this before negotiating TLS, AUTH, and so on.
+     * 
+     * Fix 20250824: try multiple servers before giving up.
+     * 
+     * Fix 20250911: do not cache this session because it does not satisfy the
+     * requirement expressed in the cache storage key.
      */
     if ((session->features & SMTP_FEATURE_SMTPUTF8) == 0
-	&& DELIVERY_REQUIRES_SMTPUTF8)
-	return (smtp_mesg_fail(state, DSN_BY_LOCAL_MTA,
+	&& DELIVERY_REQUIRES_SMTPUTF8(request))
+	return (smtp_misc_fail(state, SMTP_MISC_FAIL_DONT_CACHE
+			       | SMTP_MISC_FAIL_SOFT_NON_FINAL,
+			       DSN_BY_LOCAL_MTA,
 			       SMTP_RESP_FAKE(&fake, "5.6.7"),
-			       "SMTPUTF8 is required, "
-			       "but was not offered by host %s",
-			       session->namaddr));
+			       "message requires SMTPUTF8, but no "
+			       "server was found that supports "
+			       "SMTPUTF8. The last attempted server "
+			       "was %s", session->namaddr));
 
     /*
      * Fix 20140706: don't do silly things when the remote server announces
@@ -663,6 +666,53 @@ int     smtp_helo(SMTP_STATE *state)
 		 session->namaddr);
 	session->features |= SMTP_FEATURE_8BITMIME;
     }
+
+    /*
+     * Require that the server announces REQUIRETLS when the sender requested
+     * REQUIRETLS. Return the message as undeliverable only when there are no
+     * more alternative MX hosts. With opportunistic REQUIRETLS, only log
+     * that the server does not offer REQUIRETLS.
+     */
+#ifdef USE_TLS
+    if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE
+	&& (state->misc_flags & SMTP_MISC_FLAG_IN_STARTTLS) != 0) {
+	if ((session->features & SMTP_FEATURE_REQTLS) != 0) {
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+				 TLS_CERT_IS_MATCHED(session->tls_context) ?
+					    SMTP_TLS_STAT_NAME_REQTLS :
+					    SMTP_TLS_STAT_NAME_NOCMATCH,
+					    POL_STAT_COMPLIANT);
+	} else if (state->reqtls_level == SMTP_REQTLS_POLICY_ACT_ENFORCE) {
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+					    SMTP_TLS_STAT_NAME_NONE,
+					    POL_STAT_VIOLATION);
+	    return (smtp_misc_fail(state, SMTP_MISC_FAIL_DONT_CACHE
+				   | SMTP_MISC_FAIL_SOFT_NON_FINAL,
+				   DSN_BY_LOCAL_MTA,
+				   SMTP_RESP_FAKE(&fake, "5.7.30"),
+				   "Sender requested REQUIRETLS, "
+				   "but no server was found that "
+				   "supports REQUIRETLS. The last "
+				   "attempted server was %s",
+				   session->namaddr));
+	} else {
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+					    SMTP_TLS_STAT_NAME_NONE,
+					    POL_STAT_COMPLIANT);
+	    msg_info("%s: Sender requested REQUIRETLS, but REQUIRETLS "
+		     "support was not offered by host %s",
+		     request->queue_id, session->namaddr);
+	}
+    }
+
+    /*
+     * TODO(wietse) Maybe log servers that announce REQUIRETLS and whether
+     * the connection is authenticated?
+     */
+#endif
 
     /*
      * We use SMTP command pipelining if the server said it supported it.
@@ -764,7 +814,7 @@ int     smtp_helo(SMTP_STATE *state)
 	     * Prepare for disaster.
 	     */
 	    smtp_stream_setup(state->session->stream, var_smtp_starttls_tmout,
-			      var_smtp_rec_deadline);
+			      var_smtp_req_deadline, 0);
 	    if ((except = vstream_setjmp(state->session->stream)) != 0)
 		return (smtp_stream_except(state, except,
 					"receiving the STARTTLS response"));
@@ -792,17 +842,55 @@ int     smtp_helo(SMTP_STATE *state)
 		state->misc_flags &= ~SMTP_MISC_FLAG_IN_STARTTLS;
 		return (tls_helo_status);
 	    }
+#ifdef USE_TLSRPT
+	    if (state->tlsrpt)
+		trw_report_failure(state->tlsrpt,
+				   TLSRPT_STARTTLS_NOT_SUPPORTED,
+				    /* additional_info= */ (char *) 0,
+				    /* failure_reason= */ (char *) 0);
+#endif
 
 	    /*
 	     * Give up if we must use TLS but the server rejects STARTTLS
 	     * although support for it was announced in the EHLO response.
+	     * 
+	     * When the sender requested REQUIRETLS, and the REQUIRETLS policy
+	     * requires TLS, return the message as undeliverable only when
+	     * there are no more alternative MX hosts.
 	     */
 	    session->features &= ~SMTP_FEATURE_STARTTLS;
-	    if (TLS_REQUIRED(state->tls->level))
+	    if (TLS_REQUIRED_BY_SECURITY_LEVEL(state->tls->level)
+		|| TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level)) {
+		/* Before returning, decide all relevant policy status info. */
+		if (TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level)) {
+		    if (state->tls_stats)
+			smtp_tls_stat_decide_reqtls(state->tls_stats,
+						 SMTP_TLS_STAT_NAME_NOSTTLS,
+						    POL_STAT_VIOLATION);
+		}
+		if (TLS_REQUIRED_BY_SECURITY_LEVEL(state->tls->level)) {
+		    if (state->tls_stats)
+			smtp_tls_stat_decide_sec_level(state->tls_stats,
+						       state->tls->level,
+						       POL_STAT_VIOLATION);
+		}
+		/* Then, REQUIRETLS failure must take precedence over other. */
+		if (TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level)) {
+		    return (smtp_misc_fail(state, SMTP_MISC_FAIL_DONT_CACHE
+					   | SMTP_MISC_FAIL_SOFT_NON_FINAL,
+					   DSN_BY_LOCAL_MTA,
+					   SMTP_RESP_FAKE(&fake, "5.7.10"),
+					   "Sender requested REQUIRETLS, "
+					   "but host %s refused to "
+					   "start TLS: %s", session->namaddr,
+					   translit(resp->str, "\n", " ")));
+		}
+		/* TLS_REQUIRED_BY_SECURITY_LEVEL */
 		return (smtp_site_fail(state, STR(iter->host), resp,
 		    "TLS is required, but host %s refused to start TLS: %s",
 				       session->namaddr,
 				       translit(resp->str, "\n", " ")));
+	    }
 	    /* Else try to continue in plain-text mode. */
 	}
 
@@ -812,9 +900,44 @@ int     smtp_helo(SMTP_STATE *state)
 	 * 200412 Be sure to provide the default clause at the bottom of this
 	 * block. When TLS is required we must never, ever, end up in
 	 * plain-text mode.
+	 * 
+	 * When the sender requested REQUIRETLS, and the REQUIRETLS policy
+	 * requires TLS, return the message as undeliverable only when there
+	 * are no more alternative MX hosts.
 	 */
-	if (TLS_REQUIRED(state->tls->level)) {
+	if (TLS_REQUIRED_BY_SECURITY_LEVEL(state->tls->level)
+	    || TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level)) {
 	    if (!(session->features & SMTP_FEATURE_STARTTLS)) {
+#ifdef USE_TLSRPT
+		if (state->tlsrpt)
+		    trw_report_failure(state->tlsrpt,
+				       TLSRPT_STARTTLS_NOT_SUPPORTED,
+				        /* additional_info= */ (char *) 0,
+				        /* failure_reason= */ (char *) 0);
+#endif
+		/* Before returning, decide all relevant policy status info. */
+		if (TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level)) {
+		    if (state->tls_stats)
+			smtp_tls_stat_decide_reqtls(state->tls_stats,
+						 SMTP_TLS_STAT_NAME_NOSTTLS,
+						    POL_STAT_VIOLATION);
+		}
+		if (TLS_REQUIRED_BY_SECURITY_LEVEL(state->tls->level))
+		    if (state->tls_stats)
+			smtp_tls_stat_decide_sec_level(state->tls_stats,
+						       state->tls->level,
+						       POL_STAT_VIOLATION);
+		/* Then, REQUIRETLS failure must take precedence over other. */
+		if (TLS_REQUIRED_BY_REQTLS_POLICY(state->reqtls_level))
+		    return (smtp_misc_fail(state, SMTP_MISC_FAIL_DONT_CACHE
+					   | SMTP_MISC_FAIL_SOFT_NON_FINAL,
+					   DSN_BY_LOCAL_MTA,
+					   SMTP_RESP_FAKE(&fake, "5.7.30"),
+					   "Sender requested REQUIRETLS, "
+					   "but TLS service was not "
+					   "offered by host %s",
+					   session->namaddr));
+		/* TLS_REQUIRED_BY_SECURITY_LEVEL */
 		return (smtp_site_fail(state, DSN_BY_LOCAL_MTA,
 				       SMTP_RESP_FAKE(&fake, "4.7.4"),
 			  "TLS is required, but was not offered by host %s",
@@ -830,6 +953,15 @@ int     smtp_helo(SMTP_STATE *state)
 				       SMTP_RESP_FAKE(&fake, "4.7.0"),
 				       "TLS is required, but unavailable"));
 	    }
+	}
+	/* Continue in plain-text mode. */
+	if (state->tls_stats) {
+	    smtp_tls_stat_decide_sec_level(state->tls_stats, TLS_LEV_NONE,
+					   POL_STAT_COMPLIANT);
+	    if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE)
+		smtp_tls_stat_decide_reqtls(state->tls_stats,
+					    SMTP_TLS_STAT_NAME_NONE,
+					    POL_STAT_COMPLIANT);
 	}
     }
 #endif
@@ -855,6 +987,18 @@ static int smtp_start_tls(SMTP_STATE *state)
     TLS_CLIENT_INIT_PROPS init_props;
     VSTREAM *tlsproxy;
     VSTRING *port_buf;
+    const char *peer_log_param;
+    const char *peer_log_level;
+
+    if (smtp_tls_loglevel_maps
+	&& (peer_log_level = yana_policy_lookup(smtp_tls_loglevel_maps,
+						STR(iter->host),
+						STR(iter->addr))) != 0) {
+	peer_log_param = VAR_SMTP_TLS_LOGLEVEL_MAPS;
+    } else {
+	peer_log_param = VAR_SMTP_TLS_LOGLEVEL;
+	peer_log_level = var_smtp_tls_loglevel;
+    }
 
     /*
      * When the TLS handshake succeeds, we can reuse a connection only if TLS
@@ -888,7 +1032,7 @@ static int smtp_start_tls(SMTP_STATE *state)
      * either the transport name or the values of CAfile and CApath. We use
      * the transport name.
      * 
-     * XXX: We store only one session per lookup key. Ideally the the key maps
+     * XXX: We store only one session per lookup key. Ideally the key maps
      * 1-to-1 to a server TLS session cache. We use the IP address, port and
      * ehlo response name to build a lookup key that works for split caches
      * (that announce distinct names) behind a load balancer.
@@ -896,13 +1040,16 @@ static int smtp_start_tls(SMTP_STATE *state)
      * XXX: The TLS library will salt the serverid with further details of the
      * protocol and cipher requirements including the server ehlo response.
      * Deferring the helo to the digested suffix results in more predictable
-     * SSL session lookup key lengths.
+     * SSL session lookup key lengths. Add the current TLS security level to
+     * account for TLS level overrides based on message content or envelope
+     * metadata.
      */
     serverid = vstring_alloc(10);
     smtp_key_prefix(serverid, "&", state->iterator, SMTP_KEY_FLAG_SERVICE
 		    | SMTP_KEY_FLAG_CUR_NEXTHOP	/* With port */
 		    | SMTP_KEY_FLAG_HOSTNAME
-		    | SMTP_KEY_FLAG_ADDR);
+		    | SMTP_KEY_FLAG_ADDR
+		    | SMTP_KEY_FLAG_TLS_LEVEL);
 
     if (state->tls->conn_reuse) {
 	TLS_CLIENT_PARAMS tls_params;
@@ -927,8 +1074,11 @@ static int smtp_start_tls(SMTP_STATE *state)
 				    CApath = var_smtp_tls_CApath,
 				    mdalg = var_smtp_tls_fpt_dgst);
 	TLS_PROXY_CLIENT_START_PROPS(&start_props,
+				     log_param = peer_log_param,
+				     log_level = peer_log_level,
 				     timeout = var_smtp_starttls_tmout,
 				     tls_level = state->tls->level,
+				     enable_rpk = state->tls->enable_rpk,
 				     nexthop = session->tls_nexthop,
 				     host = STR(iter->host),
 				     namaddr = session->namaddrport,
@@ -941,7 +1091,15 @@ static int smtp_start_tls(SMTP_STATE *state)
 				     = vstring_str(state->tls->exclusions),
 				     matchargv = state->tls->matchargv,
 				     mdalg = var_smtp_tls_fpt_dgst,
-				     dane = state->tls->dane);
+#ifdef USE_TLSRPT
+				     tlsrpt = state->tlsrpt,
+#else
+				     tlsrpt = 0,
+#endif
+				     ffail_type = 0,
+				     dane = state->tls->dane,
+			   trace_size_limit = var_smtp_tls_trace_size_limit,
+				     trace_peer = STR(iter->addr));
 
 	/*
 	 * The tlsproxy(8) server enforces timeouts that are larger than
@@ -1047,10 +1205,13 @@ static int smtp_start_tls(SMTP_STATE *state)
 	session->tls_context =
 	    TLS_CLIENT_START(&start_props,
 			     ctx = smtp_tls_ctx,
+			     log_param = peer_log_param,
+			     log_level = peer_log_level,
 			     stream = session->stream,
 			     fd = -1,
 			     timeout = var_smtp_starttls_tmout,
 			     tls_level = state->tls->level,
+			     enable_rpk = state->tls->enable_rpk,
 			     nexthop = session->tls_nexthop,
 			     host = STR(iter->host),
 			     namaddr = session->namaddrport,
@@ -1063,7 +1224,17 @@ static int smtp_start_tls(SMTP_STATE *state)
 			     = vstring_str(state->tls->exclusions),
 			     matchargv = state->tls->matchargv,
 			     mdalg = var_smtp_tls_fpt_dgst,
-			     dane = state->tls->dane);
+#ifdef USE_TLSRPT
+			     tlsrpt = state->tlsrpt,
+#else
+			     tlsrpt = 0,
+#endif
+			     ffail_type = state->tls->ext_policy_failure,
+			     dane = state->tls->dane,
+			   trace_size_limit = var_smtp_tls_trace_size_limit,
+			     trace_open = 0,
+			     trace_arg = 0,
+			     trace_peer = STR(iter->addr));
 
 	/*
 	 * At this point there must not be any pending data in the stream
@@ -1098,8 +1269,9 @@ static int smtp_start_tls(SMTP_STATE *state)
 	 */
 	if (PLAINTEXT_FALLBACK_OK_AFTER_STARTTLS_FAILURE)
 	    RETRY_AS_PLAINTEXT;
+	/* Leave all TLS feature policy status info as 'undecided'. */
 	return (smtp_misc_fail(state, state->tls->level == TLS_LEV_MAY ?
-			       SMTP_NOTHROTTLE : SMTP_THROTTLE,
+			       SMTP_MISC_FAIL_NONE : SMTP_MISC_FAIL_THROTTLE,
 			       DSN_BY_LOCAL_MTA,
 			       SMTP_RESP_FAKE(&fake, "4.7.5"),
 			       "Cannot start TLS: handshake failure"));
@@ -1122,11 +1294,81 @@ static int smtp_start_tls(SMTP_STATE *state)
      * fall back to "encrypt", updating the tls_context level accordingly, so
      * we must check that here, and not state->tls->level.
      */
-    if (TLS_MUST_MATCH(session->tls_context->level))
-	if (!TLS_CERT_IS_MATCHED(session->tls_context))
+    if (TLS_MUST_MATCH(session->tls_context->level)) {
+	if (!TLS_CERT_IS_MATCHED(session->tls_context)) {
+	    int     trusted = TLS_CERT_IS_TRUSTED(session->tls_context);
+
+#ifdef USE_TLSRPT
+
+	    /*
+	     * Don't create a TLSRPT 'failure' event here, if the TLS engine
+	     * already reported a more specific reason.
+	     */
+	    if (state->tlsrpt && session->tls_context->rpt_reported == 0) {
+		(void) trw_report_failure(state->tlsrpt, trusted ?
+					  TLSRPT_CERTIFICATE_HOST_MISMATCH :
+					  TLSRPT_CERTIFICATE_NOT_TRUSTED,
+					   /* additional_info= */ (char *) 0,
+					   /* failure_reason= */ (char *) 0);
+	    }
+#endif
+	    /* Finalize TLS feature policy status info before giving up. */
+	    if (state->tls_stats)
+		smtp_tls_stat_decide_sec_level(state->tls_stats,
+					       session->tls_context->level,
+					       POL_STAT_VIOLATION);
+
+	    /*
+	     * When the sender requested REQUIRETLS, and REQUIRETLS is
+	     * enforced, return the message as undeliverable only when there
+	     * are no more alternative MX hosts.
+	     */
+	    if (state->reqtls_level == SMTP_REQTLS_POLICY_ACT_ENFORCE) {
+		if (state->tls_stats)
+		    smtp_tls_stat_decide_reqtls(state->tls_stats,
+						SMTP_TLS_STAT_NAME_NOCMATCH,
+						POL_STAT_VIOLATION);
+		return (smtp_misc_fail(state, SMTP_MISC_FAIL_DONT_CACHE
+				       | SMTP_MISC_FAIL_SOFT_NON_FINAL,
+				       DSN_BY_LOCAL_MTA,
+				       SMTP_RESP_FAKE(&fake, "5.7.10"),
+				       "Sender requested REQUIRETLS, "
+				       "but no %s server certificate "
+				       "was found. The last attempted "
+				       "server was %s", trusted ?
+				       "matching" : "trusted",
+				       session->namaddr));
+	    } else if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE) {
+		if (state->tls_stats)
+		    smtp_tls_stat_decide_reqtls(state->tls_stats,
+						SMTP_TLS_STAT_NAME_NOCMATCH,
+						POL_STAT_COMPLIANT);
+	    }
 	    return (smtp_site_fail(state, DSN_BY_LOCAL_MTA,
 				   SMTP_RESP_FAKE(&fake, "4.7.5"),
 				   "Server certificate not verified"));
+	}
+    }
+
+    /*
+     * Create a TLSRPT 'success' event only if the TLS engine has not created
+     * a TLSRPT event. For example, The TLS engine will create a TLSRPT
+     * 'failure' event when the TLS handshake was be successful, but the
+     * security level was downgraded from opportunistic "dane" to
+     * unauthenticated "encrypt".
+     */
+#ifdef USE_TLSRPT
+    if (state->tlsrpt && session->tls_context->rpt_reported == 0)
+	(void) trw_report_success(state->tlsrpt);
+#endif
+
+    /*
+     * Report relaxed enforcement if the initial TLS level was degraded.
+     */
+    if (state->tls_stats)
+	smtp_tls_stat_decide_sec_level(state->tls_stats,
+				       session->tls_context->level,
+				       POL_STAT_COMPLIANT);
 
     /*
      * At this point we have to re-negotiate the "EHLO" to reget the
@@ -1146,10 +1388,10 @@ static void smtp_hbc_logger(void *context, const char *action,
     const SMTP_STATE *state = (SMTP_STATE *) context;
 
     if (*text) {
-	msg_info("%s: %s: %s %.60s: %s",
+	msg_info("%s: %s: %s %.200s: %s",
 		 state->request->queue_id, action, where, content, text);
     } else {
-	msg_info("%s: %s: %s %.60s",
+	msg_info("%s: %s: %s %.200s",
 		 state->request->queue_id, action, where, content);
     }
 }
@@ -1187,6 +1429,18 @@ static void smtp_text_out(void *context, int rec_type,
 	    if (data_left > 0 || rec_type == REC_TYPE_CONT) {
 		smtp_fputc(' ', session->stream);
 		state->space_left -= 1;
+
+		/*
+		 * XXX This can insert a line break into the middle of a
+		 * multi-byte character (not necessarily UTF-8). Note that
+		 * multibyte characters can span queue file records, for
+		 * example if line_length_limit == smtp_line_length_limit.
+		 */
+		if (state->logged_line_length_limit == 0) {
+		    msg_info("%s: breaking line > %d bytes with <CR><LF>SPACE",
+			     state->request->queue_id, var_smtp_line_limit);
+		    state->logged_line_length_limit = 1;
+		}
 	    }
 	} else {
 	    if (rec_type == REC_TYPE_CONT) {
@@ -1389,17 +1643,17 @@ static void smtp_mime_fail(SMTP_STATE *state, int mime_errs)
 
 /* smtp_out_raw_or_mime - output buffer, raw output or MIME-aware */
 
-static int smtp_out_raw_or_mime(SMTP_STATE *state, VSTRING *buf)
+static int smtp_out_raw_or_mime(SMTP_STATE *state, int rec_type, VSTRING *buf)
 {
     SMTP_SESSION *session = state->session;
     int     mime_errs;
 
     if (session->mime_state == 0) {
-	smtp_text_out((void *) state, REC_TYPE_NORM, vstring_str(buf),
+	smtp_text_out((void *) state, rec_type, vstring_str(buf),
 		      VSTRING_LEN(buf), (off_t) 0);
     } else {
 	mime_errs =
-	    mime_state_update(session->mime_state, REC_TYPE_NORM,
+	    mime_state_update(session->mime_state, rec_type,
 			      vstring_str(buf), VSTRING_LEN(buf));
 	if (mime_errs) {
 	    smtp_mime_fail(state, mime_errs);
@@ -1423,24 +1677,25 @@ static int smtp_out_add_header(SMTP_STATE *state, const char *label,
 				 vstring_str(session->scratch2),
 				 QUOTE_FLAG_DEFAULT | QUOTE_FLAG_APPEND);
     vstring_strcat(session->scratch, gt);
-    return (smtp_out_raw_or_mime(state, session->scratch));
+    return (smtp_out_raw_or_mime(state, REC_TYPE_NORM, session->scratch));
 }
 
 /* smtp_out_add_headers - output additional headers, uses session->scratch* */
 
 static int smtp_out_add_headers(SMTP_STATE *state)
 {
-    if (smtp_cli_attr.flags & SMTP_CLI_FLAG_DELIVERED_TO)
-	if (smtp_out_add_header(state, "Delivered-To", "",
-			   state->request->rcpt_list.info->address, "") < 0)
+    /* Prepend headers in the same order as mail_copy.c. */
+    if (smtp_cli_attr.flags & SMTP_CLI_FLAG_RETURN_PATH)
+	if (smtp_out_add_header(state, "Return-Path", "<",
+				state->request->sender, ">") < 0)
 	    return (-1);
     if (smtp_cli_attr.flags & SMTP_CLI_FLAG_ORIG_RCPT)
 	if (smtp_out_add_header(state, "X-Original-To", "",
 			 state->request->rcpt_list.info->orig_addr, "") < 0)
 	    return (-1);
-    if (smtp_cli_attr.flags & SMTP_CLI_FLAG_RETURN_PATH)
-	if (smtp_out_add_header(state, "Return-Path", "<",
-				state->request->sender, ">") < 0)
+    if (smtp_cli_attr.flags & SMTP_CLI_FLAG_DELIVERED_TO)
+	if (smtp_out_add_header(state, "Delivered-To", "",
+			   state->request->rcpt_list.info->address, "") < 0)
 	    return (-1);
     return (0);
 }
@@ -1475,7 +1730,10 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 
     /* Caution: changes to RETURN() also affect code outside the main loop. */
 
+    /* 202607 Qualys+Mythos: evaluate argument before freeing resources. */
+
 #define RETURN(x) do { \
+	int _rv = (x); \
 	if (recv_state != SMTP_STATE_LAST) \
 	    DONT_CACHE_THIS_SESSION; \
 	vstring_free(next_command); \
@@ -1483,7 +1741,7 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 	    myfree((void *) survivors); \
 	if (session->mime_state) \
 	    session->mime_state = mime_state_free(session->mime_state); \
-	return (x); \
+	return (_rv); \
     } while (0)
 
 #define SENDER_IS_AHEAD \
@@ -1543,7 +1801,7 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 	msg_panic("%s: bad sender state %d (receiver state %d)",
 		  myname, send_state, recv_state);
     smtp_stream_setup(session->stream, *xfer_timeouts[send_state],
-		      var_smtp_rec_deadline);
+		      var_smtp_req_deadline, 0);
     if ((except = vstream_setjmp(session->stream)) != 0) {
 	msg_warn("smtp_proto: spurious flush before read in send state %d",
 		 send_state);
@@ -1576,7 +1834,7 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 	     * and some as null; historically, pickup(8) does not send any of
 	     * these, and the queue manager presets absent fields to "not
 	     * available" except for the rewrite context which is preset to
-	     * local by way of migration aid.  These definitions need to be
+	     * local by way of migration aid. These definitions need to be
 	     * centralized for maintainability.
 	     */
 #ifndef CAN_FORWARD_CLIENT_NAME
@@ -1671,6 +1929,14 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 		    vstring_sprintf_append(next_command, " ENVID=");
 		    xtext_quote_append(next_command, request->dsn_envid, "+=");
 		}
+		/* Fix 20250825: limit content exposure in bounce. */
+#ifdef USE_TLS
+		if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE
+		    && (session->features & SMTP_FEATURE_REQTLS) == 0)
+		    vstring_sprintf_append(next_command, " RET=%s",
+					   dsn_ret_str(DSN_RET_HDRS));
+		else
+#endif
 		if (request->dsn_ret)
 		    vstring_sprintf_append(next_command, " RET=%s",
 					   dsn_ret_str(request->dsn_ret));
@@ -1686,8 +1952,25 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 	     * the SMTPUTF8 promise that was made to the sender.
 	     */
 	    if ((session->features & SMTP_FEATURE_SMTPUTF8) != 0
-		&& (request->smtputf8 & SMTPUTF8_FLAG_REQUESTED) != 0)
+		&& (request->sendopts & SMTPUTF8_FLAG_REQUESTED) != 0)
 		vstring_strcat(next_command, " SMTPUTF8");
+
+	    /*
+	     * Request REQUIRETLS when the remote SMTP server supports
+	     * REQUIRETLS and the sender requested REQUIRETLS.
+	     */
+#ifdef USE_TLS
+	    if (state->reqtls_level > SMTP_REQTLS_POLICY_ACT_DISABLE) {
+		if ((session->features & SMTP_FEATURE_REQTLS) != 0) {
+		    vstring_strcat(next_command, " REQUIRETLS");
+		} else if (state->reqtls_level
+			   == SMTP_REQTLS_POLICY_ACT_ENFORCE) {
+		    msg_panic("Can't happen: must enforce REQUIRETLS, but "
+			      "host %s did not announce REQUIRETLS support",
+			      session->namaddr);
+		}
+	    }
+#endif
 
 	    /*
 	     * We authenticate the local MTA only, but not the sender.
@@ -1751,8 +2034,9 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 		    quote_822_local(session->scratch, rcpt->orig_addr);
 		    vstring_sprintf(session->scratch2, "%s;%s",
 		    /* Fix 20140707: sender must request SMTPUTF8. */
-				    (request->smtputf8 != 0
-			      && !allascii(vstring_str(session->scratch))) ?
+				    ((request->sendopts & SMTPUTF8_FLAG_ALL)
+				 && !allascii(vstring_str(session->scratch))
+		     && valid_utf8_stringz(vstring_str(session->scratch))) ?
 				    "utf-8" : "rfc822",
 				    vstring_str(session->scratch));
 		    orcpt_type_addr = vstring_str(session->scratch2);
@@ -1767,7 +2051,7 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 			    vstring_sprintf_append(next_command, " ORCPT=%s",
 					     vstring_str(session->scratch));
 		    } else {
-			xtext_quote(session->scratch, orcpt_type_addr, "=");
+			xtext_quote(session->scratch, orcpt_type_addr, "+=");
 			vstring_sprintf_append(next_command, " ORCPT=%s",
 					     vstring_str(session->scratch));
 		    }
@@ -1925,12 +2209,12 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 		 * not clobber this non-zero value once it is set. The
 		 * variable need not survive longjmp() calls, since the only
 		 * setjmp() which does not return early is the one sets this
-		 * condition, subquent failures always return early.
+		 * condition, subsequent failures always return early.
 		 */
 #define LOST_CONNECTION_INSIDE_DATA (except == SMTP_ERR_EOF)
 
 		smtp_stream_setup(session->stream, *xfer_timeouts[recv_state],
-				  var_smtp_rec_deadline);
+				  var_smtp_req_deadline, 0);
 		if (LOST_CONNECTION_INSIDE_DATA) {
 		    if (vstream_setjmp(session->stream) != 0)
 			RETURN(smtp_stream_except(state, SMTP_ERR_EOF,
@@ -2265,7 +2549,7 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 	if (send_state == SMTP_STATE_DOT && nrcpt > 0) {
 
 	    smtp_stream_setup(session->stream, var_smtp_data1_tmout,
-			      var_smtp_rec_deadline);
+			      var_smtp_req_deadline, var_smtp_min_data_rate);
 
 	    if ((except = vstream_setjmp(session->stream)) == 0) {
 
@@ -2307,7 +2591,8 @@ static int smtp_loop(SMTP_STATE *state, NOCLOBBER int send_state,
 		while ((rec_type = rec_get(state->src, session->scratch, 0)) > 0) {
 		    if (rec_type != REC_TYPE_NORM && rec_type != REC_TYPE_CONT)
 			break;
-		    if (smtp_out_raw_or_mime(state, session->scratch) < 0)
+		    if (smtp_out_raw_or_mime(state, rec_type,
+					     session->scratch) < 0)
 			RETURN(0);
 		    prev_type = rec_type;
 		}

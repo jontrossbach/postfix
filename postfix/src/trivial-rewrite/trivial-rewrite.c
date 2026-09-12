@@ -48,7 +48,7 @@
 /* .ad
 /* .fi
 /*	The \fBtrivial-rewrite\fR(8) servers run under control by
-/*	the Postfix master
+/*	the Postfix master(8)
 /*	server.  Each server can handle multiple simultaneous connections.
 /*	When all servers are busy while a client connects, the master
 /*	creates a new server process, provided that the trivial-rewrite
@@ -115,17 +115,17 @@
 /*	With locally submitted mail, append the string ".$mydomain" to
 /*	addresses that have no ".domain" information.
 /* .IP "\fBrecipient_delimiter (empty)\fR"
-/*	The set of characters that can separate a user name from its
-/*	extension (example: user+foo), or a .forward file name from its
-/*	extension (example: .forward+foo).
+/*	The set of characters that can separate an email address
+/*	localpart, user name, or a .forward file name from its extension.
 /* .IP "\fBswap_bangpath (yes)\fR"
 /*	Enable the rewriting of "site!user" into "user@site".
 /* .PP
 /*	Available in Postfix 2.2 and later:
 /* .IP "\fBremote_header_rewrite_domain (empty)\fR"
-/*	Don't rewrite message headers from remote clients at all when
-/*	this parameter is empty; otherwise, rewrite message headers and
-/*	append the specified domain name to incomplete addresses.
+/*	Rewrite or add message headers in mail from remote clients if
+/*	the remote_header_rewrite_domain parameter value is non-empty,
+/*	updating incomplete addresses with the domain specified in the
+/*	remote_header_rewrite_domain parameter, and adding missing headers.
 /* ROUTING CONTROLS
 /* .ad
 /* .fi
@@ -142,10 +142,12 @@
 /*	final delivery to domains listed with $virtual_mailbox_domains.
 /* .IP "\fBrelay_transport (relay)\fR"
 /*	The default mail delivery transport and next-hop destination for
-/*	remote delivery to domains listed with $relay_domains.
+/*	the relay domain address class: recipient domains that match
+/*	$relay_domains.
 /* .IP "\fBdefault_transport (smtp)\fR"
 /*	The default mail delivery transport and next-hop destination for
-/*	destinations that do not match $mydestination, $inet_interfaces,
+/*	the default domain class: recipient domains that do not match
+/*	$mydestination, $inet_interfaces,
 /*	$proxy_interfaces, $virtual_alias_domains, $virtual_mailbox_domains,
 /*	or $relay_domains.
 /* .IP "\fBparent_domain_matches_subdomains (see 'postconf -d' output)\fR"
@@ -153,8 +155,8 @@
 /*	matches subdomains of example.com,
 /*	instead of requiring an explicit ".example.com" pattern.
 /* .IP "\fBrelayhost (empty)\fR"
-/*	The next-hop destination of non-local mail; overrides non-local
-/*	domains in recipient addresses.
+/*	The next-hop destination(s) for non-local mail; takes precedence
+/*	over non-local domains in recipient addresses.
 /* .IP "\fBtransport_maps (empty)\fR"
 /*	Optional lookup tables with mappings from recipient address to
 /*	(message delivery transport, next-hop destination).
@@ -344,22 +346,23 @@ bool    var_percent_hack;
 char   *var_local_transport;
 char   *var_virt_transport;
 char   *var_relay_transport;
-int     var_resolve_dequoted;
+bool    var_resolve_dequoted;
 char   *var_virt_alias_maps;		/* XXX virtual_alias_domains */
 char   *var_virt_mailbox_maps;		/* XXX virtual_mailbox_domains */
 char   *var_virt_alias_doms;
 char   *var_virt_mailbox_doms;
 char   *var_relocated_maps;
+bool    var_enb_relocated_pfx;
 char   *var_def_transport;
 char   *var_snd_def_xport_maps;
 char   *var_empty_addr;
-int     var_show_unk_rcpt_table;
-int     var_resolve_nulldom;
+bool    var_show_unk_rcpt_table;
+bool    var_resolve_nulldom;
 char   *var_remote_rwr_domain;
 char   *var_snd_relay_maps;
 char   *var_null_relay_maps_key;
 char   *var_null_def_xport_maps_key;
-int     var_resolve_num_dom;
+bool    var_resolve_num_dom;
 bool    var_allow_min_user;
 
  /*
@@ -522,6 +525,21 @@ static void pre_accept(char *unused_name, char **unused_argv)
 
 #endif
 
+/* post_accept - announce our protocol name */
+
+static void post_accept(VSTREAM *stream, char *unused_name, char **unused_argv,
+			        HTABLE *unused_attr)
+{
+
+    /*
+     * Announce the protocol.
+     */
+    attr_print(stream, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_TRIVIAL),
+	       ATTR_TYPE_END);
+    (void) vstream_fflush(stream);
+}
+
 static void check_table_stats(int unused_event, void *unused_context)
 {
     const char *table;
@@ -631,6 +649,7 @@ int     main(int argc, char **argv)
     };
     static const CONFIG_NBOOL_TABLE nbool_table[] = {
 	VAR_APP_DOT_MYDOMAIN, DEF_APP_DOT_MYDOMAIN, &var_append_dot_mydomain,
+	VAR_ENB_RELOCATED_PFX, DEF_ENB_RELOCATED_PFX, &var_enb_relocated_pfx,
 	0,
     };
 
@@ -648,5 +667,6 @@ int     main(int argc, char **argv)
 #ifdef CHECK_TABLE_STATS_BEFORE_ACCEPT
 		      CA_MAIL_SERVER_PRE_ACCEPT(pre_accept),
 #endif
+		      CA_MAIL_SERVER_POST_ACCEPT(post_accept),
 		      0);
 }

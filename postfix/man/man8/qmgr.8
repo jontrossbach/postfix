@@ -234,7 +234,7 @@ A transport\-specific override for the default_recipient_refill_limit
 parameter value, where \fItransport\fR is the master.cf name of
 the message delivery transport.
 .IP "\fBdefault_recipient_refill_delay (5s)\fR"
-The default per\-transport maximum delay between recipients refills.
+The default per\-transport maximum delay between refilling recipients.
 .IP "\fBtransport_recipient_refill_delay ($default_recipient_refill_delay)\fR"
 A transport\-specific override for the default_recipient_refill_delay
 parameter value, where \fItransport\fR is the master.cf name of
@@ -411,7 +411,7 @@ The names of message delivery transports that should not deliver mail
 unless someone issues "\fBsendmail \-q\fR" or equivalent.
 .IP "\fBdelay_logging_resolution_limit (2)\fR"
 The maximal number of digits after the decimal point when logging
-sub\-second delay values.
+delay values.
 .IP "\fBhelpful_warnings (yes)\fR"
 Log warnings about problematic configuration settings, and provide
 helpful suggestions.

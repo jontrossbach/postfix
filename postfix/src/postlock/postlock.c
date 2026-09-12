@@ -79,7 +79,7 @@
 /*	The default location of the Postfix main.cf and master.cf
 /*	configuration files.
 /* .IP "\fBimport_environment (see 'postconf -d' output)\fR"
-/*	The list of environment parameters that a privileged Postfix
+/*	The list of environment variables that a privileged Postfix
 /*	process will import from a non-Postfix parent process, or name=value
 /*	environment overrides.
 /* SEE ALSO
@@ -202,6 +202,11 @@ int     main(int argc, char **argv)
      */
     msg_vstream_init(argv[0], VSTREAM_ERR);
     msg_cleanup(fatal_exit);
+
+    /*
+     * Check the Postfix library version as soon as we enable logging.
+     */
+    MAIL_VERSION_CHECK;
 
     /*
      * Parse JCL.

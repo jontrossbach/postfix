@@ -16,18 +16,26 @@
 #	queue.  The address mapping is recursive.
 #
 #	Normally, the \fBcanonical\fR(5) table is specified as a text file
-#	that serves as input to the \fBpostmap\fR(1) command.
-#	The result, an indexed file in \fBdbm\fR or \fBdb\fR format,
-#	is used for fast searching by the mail system. Execute the command
-#	"\fBpostmap /etc/postfix/canonical\fR" to rebuild an indexed
-#	file after changing the corresponding text file.
+#	that serves as input to the \fBpostmap\fR(1) command to create
+#	an indexed file for fast lookup.
+#
+#	Execute the command "\fBpostmap /etc/postfix/canonical\fR" to
+#	rebuild a default-type indexed file after changing the text file,
+#	or execute "\fBpostmap \fItype\fB:/etc/postfix/canonical\fR"
+#	to specify an explicit type.
+#
+#	The default indexed file type is configured with the
+#	default_database_type parameter. Depending on the platform this
+#	may be one of lmdb:, cdb:, hash:, or dbm: (without the trailing
+#       ':').
 #
 #	When the table is provided via other means such as NIS, LDAP
 #	or SQL, the same lookups are done as for ordinary indexed files.
+#	Managing such databases is outside the scope of Postfix.
 #
 #	Alternatively, the table can be provided as a regular-expression
 #	map where patterns are given as regular expressions, or lookups
-#	can be directed to TCP-based server. In those cases, the lookups
+#	can be directed to a TCP-based server. In those cases, the lookups
 #	are done in a slightly different way as described below under
 #	"REGULAR EXPRESSION TABLES" or "TCP-BASED TABLES".
 #
@@ -207,17 +215,14 @@
 # .PP
 #	Other parameters of interest:
 # .IP "\fBinet_interfaces (all)\fR"
-#	The network interface addresses that this mail system receives
-#	mail on.
+#	The local network interface addresses that this mail system
+#	receives mail on.
 # .IP "\fBlocal_header_rewrite_clients (permit_inet_interfaces)\fR"
-#	Rewrite message header addresses in mail from these clients and
-#	update incomplete addresses with the domain name in $myorigin or
-#	$mydomain; either don't rewrite message headers from other clients
-#	at all, or rewrite message headers and update incomplete addresses
-#	with the domain specified in the remote_header_rewrite_domain
-#	parameter.
+#	Rewrite or add message headers in mail from these clients,
+#	updating incomplete addresses with the domain name in $myorigin or
+#	$mydomain, and adding missing headers.
 # .IP "\fBproxy_interfaces (empty)\fR"
-#	The network interface addresses that this mail system receives mail
+#	The remote network interface addresses that this mail system receives mail
 #	on by way of a proxy or network address translation unit.
 # .IP "\fBmasquerade_classes (envelope_sender, header_sender, header_recipient)\fR"
 #	What addresses are subject to address masquerading.
@@ -226,7 +231,7 @@
 #	off in email addresses.
 # .IP "\fBmasquerade_exceptions (empty)\fR"
 #	Optional list of user names that are not subjected to address
-#	masquerading, even when their address matches $masquerade_domains.
+#	masquerading, even when their addresses match $masquerade_domains.
 # .IP "\fBmydestination ($myhostname, localhost.$mydomain, localhost)\fR"
 #	The list of domains that are delivered via the $local_transport
 #	mail delivery transport.
@@ -239,9 +244,10 @@
 #	\fIlistname\fR-request address localparts when the recipient_delimiter
 #	is set to "-".
 # .IP "\fBremote_header_rewrite_domain (empty)\fR"
-#	Don't rewrite message headers from remote clients at all when
-#	this parameter is empty; otherwise, rewrite message headers and
-#	append the specified domain name to incomplete addresses.
+#	Rewrite or add message headers in mail from remote clients if
+#	the remote_header_rewrite_domain parameter value is non-empty,
+#	updating incomplete addresses with the domain specified in the
+#	remote_header_rewrite_domain parameter, and adding missing headers.
 # SEE ALSO
 #	cleanup(8), canonicalize and enqueue mail
 #	postmap(1), Postfix lookup table manager

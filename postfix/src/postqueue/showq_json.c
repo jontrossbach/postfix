@@ -58,76 +58,15 @@
 #define STR(x)	vstring_str(x)
 #define LEN(x)	VSTRING_LEN(x)
 
-/* json_quote - quote JSON string */
-
-static char *json_quote(VSTRING *result, const char *text)
-{
-    unsigned char *cp;
-    int     ch;
-
-    /*
-     * We use short escape sequences for common control characters. Note that
-     * RFC 4627 allows "/" (0x2F) to be sent without quoting. Differences
-     * with RFC 4627: we send DEL (0x7f) as \u007F; the result remains RFC
-     * 4627 complaint.
-     */
-    VSTRING_RESET(result);
-    for (cp = (unsigned char *) text; (ch = *cp) != 0; cp++) {
-	if (UNEXPECTED(ISCNTRL(ch))) {
-	    switch (ch) {
-	    case '\b':
-		VSTRING_ADDCH(result, '\\');
-		VSTRING_ADDCH(result, 'b');
-		break;
-	    case '\f':
-		VSTRING_ADDCH(result, '\\');
-		VSTRING_ADDCH(result, 'f');
-		break;
-	    case '\n':
-		VSTRING_ADDCH(result, '\\');
-		VSTRING_ADDCH(result, 'n');
-		break;
-	    case '\r':
-		VSTRING_ADDCH(result, '\\');
-		VSTRING_ADDCH(result, 'r');
-		break;
-	    case '\t':
-		VSTRING_ADDCH(result, '\\');
-		VSTRING_ADDCH(result, 't');
-		break;
-	    default:
-		vstring_sprintf(result, "\\u%04X", ch);
-		break;
-	    }
-	} else {
-	    switch (ch) {
-	    case '\\':
-	    case '"':
-		VSTRING_ADDCH(result, '\\');
-		/* FALLTHROUGH */
-	    default:
-		VSTRING_ADDCH(result, ch);
-		break;
-	    }
-	}
-    }
-    VSTRING_TERMINATE(result);
-
-    /*
-     * Force the result to be UTF-8 (with SMTPUTF8 enabled) or ASCII (with
-     * SMTPUTF8 disabled).
-     */
-    printable(STR(result), '?');
-    return (STR(result));
-}
-
 /* json_message - report status for one message */
 
 static void format_json(VSTREAM *showq_stream)
 {
     static VSTRING *queue_name = 0;
     static VSTRING *queue_id = 0;
+    static VSTRING *oaddr = 0;
     static VSTRING *addr = 0;
+    static VSTRING *log_class = 0;
     static VSTRING *why = 0;
     static VSTRING *quote_buf = 0;
     long    arrival_time;
@@ -142,15 +81,24 @@ static void format_json(VSTREAM *showq_stream)
     if (queue_name == 0) {
 	queue_name = vstring_alloc(100);
 	queue_id = vstring_alloc(100);
+	oaddr = vstring_alloc(100);
 	addr = vstring_alloc(100);
+	log_class = vstring_alloc(100);
 	why = vstring_alloc(100);
 	quote_buf = vstring_alloc(100);
     }
 
     /*
+     * Force JSON values to UTF-8 (with SMTPUTF8 enabled) or ASCII (with
+     * SMTPUTF8 disabled).
+     */
+#define QUOTE_JSON(res, src) printable(quote_for_json((res), (src), -1), '?')
+
+    /*
      * Read the message properties and sender address.
      */
-    if (attr_scan(showq_stream, ATTR_FLAG_MORE | ATTR_FLAG_STRICT,
+    if (attr_scan(showq_stream, ATTR_FLAG_MORE | ATTR_FLAG_STRICT
+		  | ATTR_FLAG_PRINTABLE,
 		  RECV_ATTR_STR(MAIL_ATTR_QUEUE, queue_name),
 		  RECV_ATTR_STR(MAIL_ATTR_QUEUEID, queue_id),
 		  RECV_ATTR_LONG(MAIL_ATTR_TIME, &arrival_time),
@@ -161,14 +109,14 @@ static void format_json(VSTREAM *showq_stream)
 	msg_fatal_status(EX_SOFTWARE, "malformed showq server response");
     vstream_printf("{");
     vstream_printf("\"queue_name\": \"%s\", ",
-		   json_quote(quote_buf, STR(queue_name)));
+		   QUOTE_JSON(quote_buf, STR(queue_name)));
     vstream_printf("\"queue_id\": \"%s\", ",
-		   json_quote(quote_buf, STR(queue_id)));
+		   QUOTE_JSON(quote_buf, STR(queue_id)));
     vstream_printf("\"arrival_time\": %ld, ", arrival_time);
     vstream_printf("\"message_size\": %ld, ", message_size);
     vstream_printf("\"forced_expire\": %s, ", forced_expire ? "true" : "false");
     vstream_printf("\"sender\": \"%s\", ",
-		   json_quote(quote_buf, STR(addr)));
+		   QUOTE_JSON(quote_buf, STR(addr)));
 
     /*
      * Read zero or more (recipient, reason) pair(s) until attr_scan_more()
@@ -180,16 +128,24 @@ static void format_json(VSTREAM *showq_stream)
 	if (rcpt_count > 0)
 	    vstream_printf(", ");
 	vstream_printf("{");
-	if (attr_scan(showq_stream, ATTR_FLAG_MORE | ATTR_FLAG_STRICT,
+	if (attr_scan(showq_stream, ATTR_FLAG_MORE | ATTR_FLAG_STRICT
+		      | ATTR_FLAG_PRINTABLE,
+		      RECV_ATTR_STR(MAIL_ATTR_ORCPT, oaddr),
 		      RECV_ATTR_STR(MAIL_ATTR_RECIP, addr),
+		      RECV_ATTR_STR(MAIL_ATTR_LOG_CLASS, log_class),
 		      RECV_ATTR_STR(MAIL_ATTR_WHY, why),
-		      ATTR_TYPE_END) != 2)
+		      ATTR_TYPE_END) != 4)
 	    msg_fatal_status(EX_SOFTWARE, "malformed showq server response");
+	vstream_printf("\"orig_address\": \"%s\", ",
+		       QUOTE_JSON(quote_buf, STR(oaddr)));
 	vstream_printf("\"address\": \"%s\"",
-		       json_quote(quote_buf, STR(addr)));
+		       QUOTE_JSON(quote_buf, STR(addr)));
 	if (LEN(why) > 0)
-	    vstream_printf(", \"delay_reason\": \"%s\"",
-			   json_quote(quote_buf, STR(why)));
+	    vstream_printf(", \"%s\": \"%s\"",
+	    strcmp(STR(log_class), MAIL_QUEUE_DEFER) == 0 ? "delay_reason" :
+			   strcmp(STR(log_class), MAIL_QUEUE_BOUNCE) == 0 ? "bounce_reason" :
+			   "other_reason",
+			   QUOTE_JSON(quote_buf, STR(why)));
 	vstream_printf("}");
     }
     vstream_printf("]");

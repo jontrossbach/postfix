@@ -238,7 +238,7 @@ int     rec_get_raw(VSTREAM *stream, VSTRING *buf, ssize_t maxsize, int flags)
     const char *myname = "rec_get";
     int     type;
     ssize_t len;
-    int     len_byte;
+    ssize_t len_byte;
     unsigned shift;
 
     /*
@@ -261,7 +261,7 @@ int     rec_get_raw(VSTREAM *stream, VSTRING *buf, ssize_t maxsize, int flags)
 	 * limit.
 	 */
 	for (len = 0, shift = 0; /* void */ ; shift += 7) {
-	    if (shift >= (int) (NBBY * sizeof(int))) {
+	    if (shift +7 >= (int) (NBBY * sizeof(int))) {
 		msg_warn("%s: too many length bits, record type %d",
 			 VSTREAM_PATH(stream), type);
 		return (REC_TYPE_ERROR);
@@ -323,7 +323,7 @@ int     rec_get_raw(VSTREAM *stream, VSTRING *buf, ssize_t maxsize, int flags)
 int     rec_goto(VSTREAM *stream, const char *buf)
 {
     off_t   offset;
-    static const char *saved_path;
+    static char *saved_path;
     static off_t saved_offset;
     static int reverse_count;
 
@@ -336,11 +336,12 @@ int     rec_goto(VSTREAM *stream, const char *buf)
      * is likely to insert 10000 message headers, but someone might append
      * 10000 recipients.
      */
-#define STREQ(x,y) ((x) == (y) && strcmp((x), (y)) == 0)
 #define REVERSE_JUMP_LIMIT	10000
 
-    if (!STREQ(saved_path, VSTREAM_PATH(stream))) {
-	saved_path = VSTREAM_PATH(stream);
+    if (saved_path == 0 || strcmp(saved_path, VSTREAM_PATH(stream)) != 0) {
+	if (saved_path)
+	    myfree(saved_path);
+	saved_path = mystrdup(VSTREAM_PATH(stream));
 	reverse_count = 0;
 	saved_offset = 0;
     }

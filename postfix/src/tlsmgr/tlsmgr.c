@@ -283,7 +283,7 @@ static TLS_PRNG_SRC *rand_source_file;
   */
 #define DEV_PREF "dev:"
 #define DEV_PREF_LEN (sizeof((DEV_PREF)) - 1)
-#define DEV_PATH(dev) ((dev) + EGD_PREF_LEN)
+#define DEV_PATH(dev) ((dev) + DEV_PREF_LEN)
 
 #define EGD_PREF "egd:"
 #define EGD_PREF_LEN (sizeof((EGD_PREF)) - 1)
@@ -353,7 +353,8 @@ static void tlsmgr_prng_exch_event(int unused_event, void *dummy)
      * Make prediction difficult for outsiders and calculate the time for the
      * next execution randomly.
      */
-    RAND_bytes(&randbyte, 1);
+    if (RAND_bytes(&randbyte, 1) < 0)
+	randbyte = getpid() & 0xff;
     next_period = (var_tls_prng_exch_period * randbyte) / UCHAR_MAX;
     event_request_timer(tlsmgr_prng_exch_event, dummy, next_period);
 }
@@ -503,7 +504,7 @@ static int tlsmgr_key(VSTRING *buffer, int timeout)
 	    return (TLS_MGR_STAT_ERR);
 	}
     }
-    /* Return value overrites name buffer */
+    /* Return value overwrites name buffer */
     vstring_memcpy(buffer, (char *) key, sizeof(*key));
     return (TLS_MGR_STAT_OK);
 }
@@ -638,6 +639,7 @@ static void tlsmgr_service(VSTREAM *client_stream, char *unused_service,
 	 * Load session from cache.
 	 */
 	if (STREQ(STR(request), TLS_MGR_REQ_LOOKUP)) {
+	    VSTRING_RESET(buffer);
 	    if (attr_scan(client_stream, ATTR_FLAG_STRICT,
 			  RECV_ATTR_STR(TLS_MGR_ATTR_CACHE_TYPE, cache_type),
 			  RECV_ATTR_STR(TLS_MGR_ATTR_CACHE_ID, cache_id),
@@ -648,13 +650,12 @@ static void tlsmgr_service(VSTREAM *client_stream, char *unused_service,
 		if (ent->cache_label == 0) {
 		    msg_warn("bogus cache type \"%s\" in \"%s\" request",
 			     STR(cache_type), TLS_MGR_REQ_LOOKUP);
-		    VSTRING_RESET(buffer);
 		} else if (ent->cache_info == 0) {
 
 		    /*
 		     * Cache type valid, but not enabled
 		     */
-		    VSTRING_RESET(buffer);
+		     /* void */ ;
 		} else {
 		    status = tls_scache_lookup(ent->cache_info,
 					       STR(cache_id), buffer) ?
@@ -724,16 +725,15 @@ static void tlsmgr_service(VSTREAM *client_stream, char *unused_service,
 	 * RFC 5077 TLS session ticket keys
 	 */
 	else if (STREQ(STR(request), TLS_MGR_REQ_TKTKEY)) {
+	    VSTRING_RESET(buffer);
 	    if (attr_scan(client_stream, ATTR_FLAG_STRICT,
 			  RECV_ATTR_DATA(TLS_MGR_ATTR_KEYNAME, buffer),
 			  ATTR_TYPE_END) == 1) {
 		if (LEN(buffer) != 0 && LEN(buffer) != TLS_TICKET_NAMELEN) {
 		    msg_warn("invalid session ticket key name length: %ld",
 			     (long) LEN(buffer));
-		    VSTRING_RESET(buffer);
 		} else if (*smtpd_cache.cache_timeout <= 0) {
 		    status = TLS_MGR_STAT_ERR;
-		    VSTRING_RESET(buffer);
 		} else {
 		    status = tlsmgr_key(buffer, *smtpd_cache.cache_timeout);
 		}
@@ -749,18 +749,21 @@ static void tlsmgr_service(VSTREAM *client_stream, char *unused_service,
 	 * Entropy request.
 	 */
 	else if (STREQ(STR(request), TLS_MGR_REQ_SEED)) {
+	    VSTRING_RESET(buffer);
 	    if (attr_scan(client_stream, ATTR_FLAG_STRICT,
 			  RECV_ATTR_INT(TLS_MGR_ATTR_SIZE, &len),
 			  ATTR_TYPE_END) == 1) {
-		VSTRING_RESET(buffer);
 		if (len <= 0 || len > 255) {
 		    msg_warn("bogus seed length \"%d\" in \"%s\" request",
 			     len, TLS_MGR_REQ_SEED);
 		} else {
 		    VSTRING_SPACE(buffer, len);
-		    RAND_bytes((unsigned char *) STR(buffer), len);
-		    vstring_set_payload_size(buffer, len);
-		    status = TLS_MGR_STAT_OK;
+		    if (RAND_bytes((unsigned char *) STR(buffer), len) < 0) {
+			status = TLS_MGR_STAT_ERR;
+		    } else {
+			vstring_set_payload_size(buffer, len);
+			status = TLS_MGR_STAT_OK;
+		    }
 		}
 	    }
 	    attr_print(client_stream, ATTR_FLAG_NONE,
@@ -816,6 +819,23 @@ static void tlsmgr_service(VSTREAM *client_stream, char *unused_service,
 	    multi_server_disconnect(client_stream);
 	    return;				/* NOT: vstream_fflush */
 	}
+    }
+
+    /*
+     * Workaround: some OS lies under load. It tells the Postfix event
+     * handler that a server socket is readable, then it tells peekfd() that
+     * the socket has unread data, and then it tells vstring_get_null() that
+     * there is none, causing Postfix to spam the log with warning messages.
+     * Close the stream to stop such nonsense; the client can reconnect if it
+     * still wants to talk to us.
+     * 
+     * XXX Why is this problem not reported for the other five
+     * multi_server-based Postfix services?
+     */
+    else if (vstream_ferror(client_stream) || vstream_feof(client_stream)) {
+	multi_server_disconnect(client_stream);
+	return;
+	/* Note: client_stream is now a dangling pointer. */
     }
 
     /*
@@ -1004,6 +1024,22 @@ static void tlsmgr_post_init(char *unused_name, char **unused_argv)
 	    tlsmgr_cache_run_event(NULL_EVENT, (void *) ent);
 }
 
+/* tlsmgr_post_accept - announce our protocol */
+
+static void tlsmgr_post_accept(VSTREAM *stream, char *unused_name,
+			           char **unused_argv, HTABLE *unused_table)
+{
+
+    /*
+     * Announce the protocol.
+     */
+    attr_print(stream, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_TLSMGR),
+	       ATTR_TYPE_END);
+    (void) vstream_fflush(stream);
+}
+
+
 /* tlsmgr_before_exit - save PRNG state before exit */
 
 static void tlsmgr_before_exit(char *unused_service_name, char **unused_argv)
@@ -1061,6 +1097,7 @@ int     main(int argc, char **argv)
 		      CA_MAIL_SERVER_STR_TABLE(str_table),
 		      CA_MAIL_SERVER_PRE_INIT(tlsmgr_pre_init),
 		      CA_MAIL_SERVER_POST_INIT(tlsmgr_post_init),
+		      CA_MAIL_SERVER_POST_ACCEPT(tlsmgr_post_accept),
 		      CA_MAIL_SERVER_EXIT(tlsmgr_before_exit),
 		      CA_MAIL_SERVER_LOOP(tlsmgr_loop),
 		      CA_MAIL_SERVER_SOLITARY,

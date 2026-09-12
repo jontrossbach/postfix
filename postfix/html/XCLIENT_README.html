@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -7,7 +7,8 @@
 
 <title>Postfix XCLIENT Howto</title>
 
-<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -89,7 +90,7 @@ names are shown in upper case, they are in fact case insensitive.
 
 <ul>
 
-    <li> <p> Attribute values are xtext encoded as per <a href="http://tools.ietf.org/html/rfc1891">RFC 1891</a>.
+    <li> <p> Attribute values are xtext encoded as per <a href="https://tools.ietf.org/html/rfc1891">RFC 1891</a>.
     </p>
 
     <li> <p> The NAME attribute specifies a remote SMTP client
@@ -144,8 +145,8 @@ xtext encode attribute values. Servers that wish to interoperate
 with these older implementations should be prepared to receive
 unencoded information. </p>
 
-<p> Note 4: Some Postfix implementations do not implement the PORT
-or LOGIN attributes.  </p>
+<p> Note 4: The PORT attribute is implemented in Postfix 2.5 and
+later; the LOGIN attribute in Postfix 2.9 and later. </p>
 
 <h2>XCLIENT Server response</h2>
 
@@ -260,7 +261,7 @@ before each MAIL FROM command. </p>
 <h2> References </h2>
 
 <p> Moore, K, "SMTP Service Extension for Delivery Status Notifications",
-<a href="http://tools.ietf.org/html/rfc1891">RFC 1891</a>, January 1996. </p>
+<a href="https://tools.ietf.org/html/rfc1891">RFC 1891</a>, January 1996. </p>
 
 </body>
 

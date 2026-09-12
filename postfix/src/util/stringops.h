@@ -30,7 +30,15 @@ extern char *trimblanks(char *, ssize_t);
 extern char *concatenate(const char *,...);
 extern char *mystrtok(char **, const char *);
 extern char *mystrtokq(char **, const char *, const char *);
+extern char *mystrtokdq(char **, const char *);
+extern char *mystrtok_cw(char **, const char *, const char *);
+extern char *mystrtokq_cw(char **, const char *, const char *, const char *);
+extern char *mystrtokdq_cw(char **, const char *, const char *);
 extern char *translit(char *, const char *, const char *);
+
+#define mystrtok(cp, sp) mystrtok_cw((cp), (sp), (char *) 0)
+#define mystrtokq(cp, sp, pp) mystrtokq_cw((cp), (sp), (pp), (char *) 0)
+#define mystrtokdq(cp, sp) mystrtokdq_cw((cp), (sp), (char *) 0)
 
 #define printable(string, replacement) \
 	printable_except((string), (replacement), (char *) 0)
@@ -45,20 +53,31 @@ extern char *sane_dirname(VSTRING *, const char *);
 extern VSTRING *unescape(VSTRING *, const char *);
 extern VSTRING *escape(VSTRING *, const char *, ssize_t);
 extern int alldig(const char *);
+extern int allalnum(const char *);
+extern int allalnumus(const char *);
 extern int allprint(const char *);
+extern int all_isprint(const char *);
+extern int all_isprint_tab(const char *);
 extern int allspace(const char *);
 extern int allascii_len(const char *, ssize_t);
 extern const char *WARN_UNUSED_RESULT split_nameval(char *, char **, char **);
 extern const char *WARN_UNUSED_RESULT split_qnameval(char *, char **, char **);
 extern int valid_utf8_string(const char *, ssize_t);
+extern int valid_utf8_stringz(const char *);
 extern size_t balpar(const char *, const char *);
 extern char *WARN_UNUSED_RESULT extpar(char **, const char *, int);
 extern int strcasecmp_utf8x(int, const char *, const char *);
 extern int strncasecmp_utf8x(int, const char *, const char *, ssize_t);
+extern char *quote_for_json(VSTRING *, const char *, ssize_t);
+extern char *quote_for_json_append(VSTRING *, const char *, ssize_t);
+extern char *quote_for_json_var(VSTRING *,...);
+extern const char *mystrerror(int);
+extern char *normalize_ws(char *);
 
 #define EXTPAR_FLAG_NONE	(0)
 #define EXTPAR_FLAG_STRIP	(1<<0)	/* "{ text }" -> "text" */
 #define EXTPAR_FLAG_EXTRACT	(1<<1)	/* hint from caller's caller */
+#define EXTPAR_FLAG_NORMAL_WS	(1<<2)	/* normalize 'isspace' members */
 
 #define CASEF_FLAG_UTF8		(1<<0)
 #define CASEF_FLAG_APPEND	(1<<1)
@@ -80,6 +99,17 @@ extern int strncasecmp_utf8x(int, const char *, const char *, ssize_t);
 #define strncasecmp_utf8(s1, s2, l) \
     strncasecmp_utf8x(util_utf8_enable ? CASEF_FLAG_UTF8 : 0, (s1), (s2), (l))
 
+ /*
+  * API compatibility wrappers.
+  */
+#define allprint all_isprint
+
+ /*
+  * Use STRREF(x) instead of x, to shut up compiler warnings when the operand
+  * is a string literal.
+  */
+#define STRREF(x)		(&x[0])
+
 /* LICENSE
 /* .ad
 /* .fi
@@ -94,6 +124,9 @@ extern int strncasecmp_utf8x(int, const char *, const char *, ssize_t);
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 #endif

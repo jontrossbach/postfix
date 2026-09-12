@@ -46,8 +46,11 @@
 #define PCF_MASTER_PARAM	(1<<19)	/* manage master.cf -o name=value */
 #define PCF_HIDE_VALUE		(1<<20)	/* hide main.cf/master.cf =value */
 #define PCF_SHOW_TLS		(1<<21)	/* TLS support introspection */
+#define PCF_WARN_UNUSED_DEPRECATED (1<<22)	/* As the name says */
+#define PCF_SHOW_JSON		(1 << 23)	/* JSON output */
+#define PCF_MASTER_PP		(1<<24)	/* multiple -P */
 
-#define PCF_DEF_MODE	0
+#define PCF_DEF_MODE	(PCF_WARN_UNUSED_DEPRECATED)
 
  /*
   * Structure for one "valid parameter" (built-in, service-defined or valid
@@ -68,6 +71,7 @@ typedef struct {
 #define PCF_PARAM_FLAG_LEGACY	(1<<4)	/* legacy parameter name */
 #define PCF_PARAM_FLAG_READONLY	(1<<5)	/* legacy parameter name */
 #define PCF_PARAM_FLAG_DBMS	(1<<6)	/* dbms-defined parameter name */
+#define PCF_PARAM_FLAG_NUMBER	(1<<7)	/* numeric value */
 
 #define PCF_PARAM_MASK_CLASS \
 	(PCF_PARAM_FLAG_BUILTIN | PCF_PARAM_FLAG_SERVICE | PCF_PARAM_FLAG_USER)
@@ -81,6 +85,7 @@ typedef struct {
 #define PCF_LEGACY_PARAMETER(node) ((node)->flags & PCF_PARAM_FLAG_LEGACY)
 #define PCF_READONLY_PARAMETER(node) ((node)->flags & PCF_PARAM_FLAG_READONLY)
 #define PCF_DBMS_PARAMETER(node) ((node)->flags & PCF_PARAM_FLAG_DBMS)
+#define PCF_NUMBER_PARAMETER(mode) ((node)->flags & PCF_PARAM_FLAG_NUMBER)
 
  /* Values for param_data. See postconf_node module for narrative text. */
 #define PCF_PARAM_NO_DATA	((char *) 0)
@@ -171,6 +176,8 @@ extern int pcf_cmd_mode;
   * postconf_misc.c.
   */
 extern void pcf_set_config_dir(void);
+extern const char *pcf_get_main_path(void);
+extern const char *pcf_get_master_path(void);
 
  /*
   * postconf_main.c
@@ -196,7 +203,7 @@ extern void pcf_print_master_entry(VSTREAM *, int, PCF_MASTER_ENT *);
 extern void pcf_free_master_entry(PCF_MASTER_ENT *);
 extern void pcf_show_master_fields(VSTREAM *, int, int, char **);
 extern void pcf_edit_master_field(PCF_MASTER_ENT *, int, const char *);
-extern void pcf_show_master_params(VSTREAM *, int, int, char **);
+extern void pcf_show_master_params(VSTREAM *, int, int, int, char **);
 extern void pcf_edit_master_param(PCF_MASTER_ENT *, int, const char *, const char *);
 
 #define PCF_WARN_ON_OPEN_ERROR	0
@@ -272,12 +279,12 @@ typedef struct {
  /*
   * postconf_user.c.
   */
-extern void pcf_register_user_parameters(void);
+extern void pcf_register_user_parameters(int);
 
  /*
   * postconf_dbms.c
   */
-extern void pcf_register_dbms_parameters(const char *,
+extern void pcf_register_dbms_parameters(int, const char *,
 	              const char *(*) (const char *, int, PCF_MASTER_ENT *),
 					         PCF_MASTER_ENT *);
 
@@ -301,6 +308,7 @@ extern void PRINTFLIKE(3, 4) pcf_print_line(VSTREAM *, int, const char *,...);
   */
 extern void pcf_flag_unused_main_parameters(void);
 extern void pcf_flag_unused_master_parameters(void);
+extern int pcf_found_deprecated;
 
  /*
   * postconf_other.c.

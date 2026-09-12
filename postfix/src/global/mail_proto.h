@@ -32,8 +32,8 @@
 #define MAIL_PROTO_QMQP		"QMQP"
 
  /*
-  * Names of services: these are the names of the UNIX-domain socket or or
-  * FIFO that a service listens on.
+  * Names of services: these are the names of the UNIX-domain socket or FIFO
+  * that a service listens on.
   */
 #define MAIL_SERVICE_BOUNCE	"bounce"
 #define MAIL_SERVICE_CLEANUP	"cleanup"
@@ -61,6 +61,13 @@
 #define MAIL_SERVICE_DNSBLOG	"dnsblog"
 #define MAIL_SERVICE_TLSPROXY	"tlsproxy"
 #define MAIL_SERVICE_POSTLOG	"postlog"
+
+ /*
+  * Process names: convention is to use the basename of an executable file,
+  * but there is nothing to enforce that.
+  */
+#define MAIL_PROC_NAME_SMTP	"smtp"
+#define MAIL_PROC_NAME_LMTP	"lmtp"
 
  /*
   * Mail source classes. Used to specify policy decisions for content
@@ -114,13 +121,34 @@
   */
 extern VSTREAM *mail_connect(const char *, const char *, int);
 extern VSTREAM *mail_connect_wait(const char *, const char *);
-extern int mail_command_client(const char *, const char *,...);
+extern int mail_command_client(const char *, const char *, const char *,...);
 extern int mail_command_server(VSTREAM *,...);
 extern int mail_trigger(const char *, const char *, const char *, ssize_t);
 extern char *mail_pathname(const char *, const char *);
 
  /*
-  * Attribute names.
+  * Each Postfix internal service identifies the protocol that it intends to
+  * use. On the receiver end, this information does not contribute to the
+  * reported number of received attributes (it is a constant).
+  */
+#define MAIL_ATTR_PROTO		"protocol"
+
+#define MAIL_ATTR_PROTO_ANVIL	"anvil_protocol"
+#define MAIL_ATTR_PROTO_BOUNCE	"delivery_status_protocol"
+#define MAIL_ATTR_PROTO_CLEANUP	"cleanup_protocol"
+#define MAIL_ATTR_PROTO_DELIVER	"delivery_request_protocol"
+#define MAIL_ATTR_PROTO_FLUSH	"queue_flush_protocol"
+#define MAIL_ATTR_PROTO_POSTDROP "postdrop_protocol"
+#define MAIL_ATTR_PROTO_PROXYMAP "proxymap_protocol"
+#define MAIL_ATTR_PROTO_SCACHE	"connection_cache_protocol"
+#define MAIL_ATTR_PROTO_SHOWQ	"mail_queue_list_protocol"
+#define MAIL_ATTR_PROTO_TLSMGR	"tlsmgr_protocol"
+#define MAIL_ATTR_PROTO_TLSPROXY "tlsproxy_protocol"
+#define MAIL_ATTR_PROTO_TRIVIAL	"trivial_rewrite_protocol"
+#define MAIL_ATTR_PROTO_VERIFY	"address_verification_prrotocol"
+
+ /*
+  * Attribute names in internal and policy delegation protocols.
   */
 #define MAIL_ATTR_REQ		"request"
 #define MAIL_ATTR_NREQ		"nrequest"
@@ -179,6 +207,11 @@ extern char *mail_pathname(const char *, const char *);
 #define MAIL_ATTR_CRYPTO_PROTOCOL "encryption_protocol"
 #define MAIL_ATTR_CRYPTO_CIPHER	"encryption_cipher"
 #define MAIL_ATTR_CRYPTO_KEYSIZE "encryption_keysize"
+#define MAIL_ATTR_TLS_SNI	"tls_sni"
+#define MAIL_ATTR_COMPAT_LEVEL	"compatibility_level"
+#define MAIL_ATTR_MAIL_VERSION	"mail_version"
+
+#define MAIL_ATTR_INST_FLAGS	"instance_flags"
 
  /*
   * Suffixes for sender_name, sender_domain etc.
@@ -230,6 +263,10 @@ extern char *mail_pathname(const char *, const char *);
 #define MAIL_ATTR_ORG_NONE	"unknown"	/* origin unknown */
 #define MAIL_ATTR_ORG_LOCAL	"local"	/* local submission */
 
+#define MAIL_ATTR_MESSAGE_ID	"message_id"	/* Used for threaded bounce */
+
+#define MAIL_ATTR_LOG_CLASS	"log_class"	/* bounce/defer/trace */
+
  /*
   * XCLIENT/XFORWARD in SMTP.
   */
@@ -276,12 +313,19 @@ extern char *mail_pathname(const char *, const char *);
 #define MAIL_ATTR_DSN_RET	"ret_flags"	/* dsn full/headers */
 #define MAIL_ATTR_DSN_NOTIFY	"notify_flags"	/* dsn notify flags */
 #define MAIL_ATTR_DSN_ORCPT	"dsn_orig_rcpt"	/* dsn original recipient */
-#define MAIL_ATTR_SMTPUTF8	"smtputf8"	/* RFC6531 support */
+#define MAIL_ATTR_SENDOPTS	"sendopts"	/* RFC6531 etc. support */
 
  /*
   * SMTP reply footer support.
   */
 #define MAIL_ATTR_SERVER_NAME	"server_name"
+
+ /*
+  * Non-Berkeley-DB migration.
+  */
+#define MAIL_ATTR_PROTO_NBDB_REINDEX	"nbdb_reindex"	/* Re-index protocol */
+#define MAIL_ATTR_NBDB_TYPE		"nbdb_type"	/* maptype */
+#define MAIL_ATTR_NBDB_PATH		"nbdb_path"	/* mapname */
 
 /* LICENSE
 /* .ad
@@ -297,6 +341,9 @@ extern char *mail_pathname(const char *, const char *);
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 #endif

@@ -67,18 +67,18 @@ path.
     $ export MANPATH; MANPATH="`pwd`/man:$MANPATH"
     $ setenv MANPATH "`pwd`/man:$MANPATH"
 
-Of particular interest is the postconf(5) manual page that lists all the 500+
-configuration parameters. The HTML version of this text makes it easy to
-navigate around.
+Of particular interest is the postconf(5) manual page that lists all the 900+
+configuration parameters. The hyperlinks in the HTML version (html/
+postconf.5.html) make the text easy to navigate.
 
 All Postfix source files have their own built-in manual page. Tools to extract
 those embedded manual pages are available in the mantools directory.
 
 44 -- BBuuiillddiinngg oonn aa ssuuppppoorrtteedd ssyysstteemm
 
-Postfix development happens on FreeBSD and MacOS X, with regular tests on Linux
-(Fedora, Ubuntu) and Solaris. Support for other systems relies on feedback from
-their users, and may not always be up-to-date.
+Postfix development happens on FreeBSD and Linux, with occasional tests on
+Solaris. Support for other systems relies on feedback from their users, and may
+not always be up-to-date.
 
 OpenBSD is partially supported. The libc resolver does not implement the
 documented "internal resolver options which are [...] set by changing fields in
@@ -331,7 +331,7 @@ install" or "make upgrade".
     # make upgrade meta_directory=/usr/libexec/postfix ...
     # make install meta_directory=/usr/libexec/postfix ...
 
-As with the command "make makefiles, the command "make install/upgrade
+As with the command "make makefiles", the command "make install/upgrade
 name=value..." will replace the string MAIL_VERSION at the end of a
 configuration parameter value with the Postfix release version. Do not try to
 specify something like $mail_version on this command line. This produces
@@ -376,27 +376,31 @@ whistles. Support for third-party databases etc. must be configured when
 Postfix is compiled. The following documents describe how to build Postfix with
 support for optional features:
 
-     _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-    |OOppttiioonnaall ffeeaattuurree                  |DDooccuummeenntt     |AAvvaaiillaabbiilliittyy|
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |Berkeley DB database              |DB_README    |Postfix 1.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |LMDB database                     |LMDB_README  |Postfix 2.11|
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |LDAP database                     |LDAP_README  |Postfix 1.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |MySQL database                    |MYSQL_README |Postfix 1.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |Perl compatible regular expression|PCRE_README  |Postfix 1.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |PostgreSQL database               |PGSQL_README |Postfix 2.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |SASL authentication               |SASL_README  |Postfix 1.0 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |SQLite database                   |SQLITE_README|Postfix 2.8 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
-    |STARTTLS session encryption       |TLS_README   |Postfix 2.2 |
-    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+     _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+    |OOppttiioonnaall ffeeaattuurree                  |DDooccuummeenntt      |AAvvaaiillaabbiilliittyy|
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |Berkeley DB database              |DB_README     |Postfix 1.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |CDB database                      |CDB_README    |Postfix 2.2 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |LMDB database                     |LMDB_README   |Postfix 2.11|
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |LDAP database                     |LDAP_README   |Postfix 1.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |MongoDB database                  |MONGODB_README|Postfix 3.9 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |MySQL database                    |MYSQL_README  |Postfix 1.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |Perl compatible regular expression|PCRE_README   |Postfix 1.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |PostgreSQL database               |PGSQL_README  |Postfix 2.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |SASL authentication               |SASL_README   |Postfix 1.0 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |SQLite database                   |SQLITE_README |Postfix 2.8 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
+    |STARTTLS session encryption       |TLS_README    |Postfix 2.2 |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ |
 
 Note: IP version 6 support is compiled into Postfix on operating systems that
 have IPv6 support. See the IPV6_README file for details.
@@ -430,7 +434,9 @@ postconf.5 | less").
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
     |config_directory     |/etc/postfix        |
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
-    |default_database_type|hash                |
+    |default_database_type|lmdb, cdb, or hash  |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
+    |default_cache_db_type|lmdb or btree       |
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
     |daemon_directory     |/usr/libexec/postfix|
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
@@ -466,7 +472,7 @@ configuration file, except for one: the parameter that specifies the location
 of Postfix configuration files. In order to build Postfix with a configuration
 directory other than /etc/postfix, use:
 
-    $ make makefiles CCARGS='-DDEF_CONFIG_DIR=\"/some/where\"'
+    $ make makefiles CCARGS="-DDEF_CONFIG_DIR=\\\"/some/where\\\""
     $ make
 
 IMPORTANT: Be sure to get the quotes right. These details matter a lot.
@@ -482,7 +488,9 @@ postconf.5 | less").
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
     |DEF_CONFIG_DIR   |config_directory     |/etc/postfix        |
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
-    |DEF_DB_TYPE      |default_database_type|hash                |
+    |DEF_DB_TYPE      |default_database_type|lmdb, cdb, or hash  |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
+    |DEF_CACHE_DB_TYPE|default_cache_db_type|lmdb or btree       |
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
     |DEF_DAEMON_DIR   |daemon_directory     |/usr/libexec/postfix|
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
@@ -502,9 +510,12 @@ postconf.5 | less").
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
     |DEF_SENDMAIL_PATH|sendmail_path        |/usr/sbin/sendmail  |
     |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
+    |DEF_SHLIB_DIR    |shlib_directory      |/usr/lib/postfix    |
+    |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
 
 Note: the data_directory parameter (for caches and pseudo-random numbers) was
-introduced with Postfix version 2.5.
+introduced with Postfix version 2.5; shlib_directory (for shared-library
+objects and database plugins) with Postfix version 3.0.
 
 44..77 -- OOvveerrrriiddiinngg ootthheerr ccoommppiillee--ttiimmee ffeeaattuurreess
 
@@ -536,9 +547,10 @@ The following is an extensive list of names and values.
 |_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
 ||                              |Do not build with Berkeley DB support. By    |
 ||                              |default, Berkeley DB support is compiled in  |
-||-DNO_DB                       |on platforms that are known to support this  |
-||                              |feature. If you override this, then you      |
-||                              |probably should also override DEF_DB_TYPE as |
+||                              |on platforms that have historically supported|
+||-DNO_DB                       |this feature. If you override this, then you |
+||                              |probably should also override                |
+||                              |default_database_type or DEF_DB_TYPE as      |
 ||                              |described in section 4.6.                    |
 |_|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
 ||-DNO_DNSSEC                   |Do not build with DNSSEC support, even if the|
@@ -567,7 +579,7 @@ The following is an extensive list of names and values.
 ||                              |Do not build with IPv6 support. By default,  |
 ||                              |IPv6 support is compiled in on platforms that|
 ||                              |are known to have IPv6 support. Note: this   |
-||-DNO_IPV6                     |directive is for debugging And testing only. |
+||-DNO_IPV6                     |directive is for debugging and testing only. |
 ||                              |It is not guaranteed to work on all          |
 ||                              |platforms. If you don't want IPv6 support,   |
 ||                              |set "inet_protocols = ipv4" in main.cf.      |
@@ -593,7 +605,7 @@ The following is an extensive list of names and values.
 ||-DNO_POSIX_GETPW_R            |getpwuid_r. By default Postfix uses these    |
 ||                              |where they are known to be available.        |
 |_|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
-||-DNO_RES_NCALLS              |Do not build with the threadsafe resolver(5) |
+||-DNO_RES_NCALLS               |Do not build with the threadsafe resolver(5) |
 ||                              |API (res_ninit() etc.).                      |
 |_|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
 ||                              |Use setjmp()/longjmp() instead of sigsetjmp  |
@@ -604,6 +616,14 @@ The following is an extensive list of names and values.
 ||                              |Use sprintf() instead of snprintf(). By      |
 ||-DNO_SNPRINTF                 |default, Postfix uses snprintf() except on   |
 ||                              |ancient systems.                             |
+|_|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
+||                              |Do not build with support for OpenSSL TLS    |
+||                              |traces. Some vendor OpenSSL runtime libraries|
+||                              |are built without support for tracing, and   |
+||-DNO_TLS_TRACE                |Postfix software built on a system with TLS  |
+||                              |trace support would not work when installed  |
+||                              |on one without. See smtp_tls_loglevel in the |
+||                              |postconf(5) manual.                          |
 |_|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
 |                               |Specifies a non-default compiler debugging   |
 |DEBUG=debug_level              |level. The default is "-g". Specify DEBUG= to|
@@ -679,7 +699,7 @@ is successful, then you can proceed to install Postfix (section 6).
 If the command produces compiler error messages, it may be time to search the
 web or to ask the postfix-users@postfix.org mailing list, but be sure to search
 the mailing list archives first. Some mailing list archives are linked from
-http://www.postfix.org/.
+https://www.postfix.org/.
 
 55 -- PPoorrttiinngg PPoossttffiixx ttoo aann uunnssuuppppoorrtteedd ssyysstteemm
 
@@ -829,7 +849,7 @@ and watch your maillog file for any error messages. The pathname is /var/log/
 maillog, /var/log/mail, /var/log/syslog, or something else. Typically, the
 pathname is defined in the /etc/syslog.conf file.
 
-    $ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+    $ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 
 Note: the most important error message is logged first. Later messages are not
 as useful.
@@ -879,7 +899,7 @@ and watch your maillog file for any error messages. The pathname is /var/log/
 maillog, /var/log/mail, /var/log/syslog, or something else. Typically, the
 pathname is defined in the /etc/syslog.conf file.
 
-    $ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+    $ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 
 Note: the most important error message is logged first. Later messages are not
 as useful.
@@ -919,7 +939,7 @@ and watch your maillog file for any error messages. The pathname is /var/log/
 maillog, /var/log/mail, /var/log/syslog, or something else. Typically, the
 pathname is defined in the /etc/syslog.conf file.
 
-    $ egrep '(reject|warning|error|fatal|panic):' /some/log/file
+    $ grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 
 Note: the most important error message is logged first. Later messages are not
 as useful.
@@ -1073,7 +1093,7 @@ alias_maps" will tell you the exact location of the text file.
 
 First, be sure to update the text file with aliases for root, postmaster and
 "postfix" that forward mail to a real person. Postfix has a sample aliases file
-/etc/postfix/aliases that you can adapt to local conditions.
+/etc/postfix/aliases that you can copy and adapt to local conditions. /p>
 
     /etc/aliases:
         root: you
@@ -1088,6 +1108,14 @@ Finally, build the indexed aliases file with one of the following commands:
 
     # newaliases
     # sendmail -bi
+    # postalias /etc/aliases (pathname is system dependent!)
+
+The form "postalias /etc/aliases" builds a default-type indexed file. Use
+"postalias type:/etc/aliases" to specify an explicit type (it should match the
+type in the output from "postconf -x alias_maps").
+
+The default indexed file type is configured with the default_database_type
+parameter. To list available explicit types, execute the command "ppoossttccoonnff --mm".
 
 1111 -- TToo cchhrroooott oorr nnoott ttoo cchhrroooott
 
@@ -1150,7 +1178,7 @@ Hopefully, the number of problems will be small, but it is a good idea to run
 every night before the syslog files are rotated:
 
     # postfix check
-    # egrep '(reject|warning|error|fatal|panic):' /some/log/file
+    # grep -E '(reject|warning|error|fatal|panic):' /some/log/file
 
   * The first line (postfix check) causes Postfix to report file permission/
     ownership discrepancies.

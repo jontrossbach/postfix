@@ -94,7 +94,8 @@
 /*	external and internal forms differ), or MA_FORM_INTERNAL_FIRST
 /*	(internal form, then external form if the internal and external
 /*	forms differ).
-/* .IP in_form .IP out_form
+/* .IP in_form
+/* .IP out_form
 /*	Input and output address forms, one of MA_FORM_INTERNAL (unquoted
 /*	form), or MA_FORM_EXTERNAL (quoted form).
 /* .IP strategy
@@ -207,6 +208,8 @@ static int strategy_from_string(const char *strategy_string)
 
 /* strategy_to_string - internal form to symbolic strategy flags */
 
+#if 0
+
 static const char *strategy_to_string(VSTRING *res_buf, int strategy_mask)
 {
     static VSTRING *my_buf;
@@ -217,6 +220,8 @@ static const char *strategy_to_string(VSTRING *res_buf, int strategy_mask)
 			      strategy_table, strategy_mask,
 			      NAME_MASK_WARN | NAME_MASK_PIPE));
 }
+
+#endif
 
 #endif
 
@@ -441,8 +446,8 @@ const char *mail_addr_find_opt(MAPS *path, const char *address, char **extp,
     /*
      * Try localpart@ even if the domain is not local.
      */
-    if ((strategy & MA_FIND_LOCALPART_AT) != 0 \
-	&&result == 0 && path->error == 0)
+    if ((strategy & MA_FIND_LOCALPART_AT) != 0
+	&& result == 0 && path->error == 0)
 	result = find_local(path, ratsign, 1, int_full_key,
 			    int_bare_key, query_form, extp, &saved_ext,
 			    ext_addr_buf);

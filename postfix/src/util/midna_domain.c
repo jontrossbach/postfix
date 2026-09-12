@@ -57,7 +57,7 @@
 /*
 /*	midna_domain_pre_chroot() does some pre-chroot initialization.
 /* SEE ALSO
-/*	http://unicode.org/reports/tr46/ Unicode IDNA Compatibility processing
+/*	https://unicode.org/reports/tr46/ Unicode IDNA Compatibility processing
 /*	msg(3) diagnostics interface
 /* DIAGNOSTICS
 /*	Fatal errors: memory allocation problem.
@@ -178,7 +178,7 @@ static void *midna_domain_to_ascii_create(const char *name, void *unused_context
     /*
      * Paranoia: do not expose uidna_*() to unfiltered network data.
      */
-    if (allascii(name) == 0 && valid_utf8_string(name, strlen(name)) == 0) {
+    if (allascii(name) == 0 && valid_utf8_stringz(name) == 0) {
 	msg_warn("%s: Problem translating domain \"%.100s\" to ASCII form: %s",
 		 myname, name, "malformed UTF-8");
 	return (0);
@@ -189,11 +189,13 @@ static void *midna_domain_to_ascii_create(const char *name, void *unused_context
      */
     idna = uidna_openUTS46(midna_domain_transitional ? UIDNA_DEFAULT
 			   : UIDNA_NONTRANSITIONAL_TO_ASCII, &error);
-    anl = uidna_nameToASCII_UTF8(idna,
-				 name, strlen(name),
-				 buf, sizeof(buf) - 1,
-				 &info,
-				 &error);
+    /* 202604 Claude: avoid null deref after uidna_openUTS46() failure. */
+    if (idna && U_SUCCESS(error))
+	anl = uidna_nameToASCII_UTF8(idna,
+				     name, strlen(name),
+				     buf, sizeof(buf) - 1,
+				     &info,
+				     &error);
     uidna_close(idna);
 
     /*
@@ -203,7 +205,7 @@ static void *midna_domain_to_ascii_create(const char *name, void *unused_context
      * "fake" A-labels, as required by UTS 46 section 4.1, but we rely on
      * valid_hostname() on the output side just to be sure.
      */
-    if (U_SUCCESS(error) && info.errors == 0 && anl > 0) {
+    if (idna && U_SUCCESS(error) && info.errors == 0 && anl > 0) {
 	buf[anl] = 0;				/* XXX */
 	if (!valid_hostname(buf, DONT_GRIPE)) {
 	    msg_warn("%s: Problem translating domain \"%.100s\" to ASCII form: %s",
@@ -232,7 +234,7 @@ static void *midna_domain_to_utf8_create(const char *name, void *unused_context)
     /*
      * Paranoia: do not expose uidna_*() to unfiltered network data.
      */
-    if (allascii(name) == 0 && valid_utf8_string(name, strlen(name)) == 0) {
+    if (allascii(name) == 0 && valid_utf8_stringz(name) == 0) {
 	msg_warn("%s: Problem translating domain \"%.100s\" to UTF-8 form: %s",
 		 myname, name, "malformed UTF-8");
 	return (0);
@@ -243,11 +245,13 @@ static void *midna_domain_to_utf8_create(const char *name, void *unused_context)
      */
     idna = uidna_openUTS46(midna_domain_transitional ? UIDNA_DEFAULT
 			   : UIDNA_NONTRANSITIONAL_TO_UNICODE, &error);
-    anl = uidna_nameToUnicodeUTF8(idna,
-				  name, strlen(name),
-				  buf, sizeof(buf) - 1,
-				  &info,
-				  &error);
+    /* 202604 Claude: avoid null deref after uidna_openUTS46() failure. */
+    if (idna && U_SUCCESS(error))
+	anl = uidna_nameToUnicodeUTF8(idna,
+				      name, strlen(name),
+				      buf, sizeof(buf) - 1,
+				      &info,
+				      &error);
     uidna_close(idna);
 
     /*
@@ -256,7 +260,7 @@ static void *midna_domain_to_utf8_create(const char *name, void *unused_context)
      * other invalid forms that are not covered in UTS 46, section 4.1). We
      * rely on midna_domain_to_ascii() to validate the output.
      */
-    if (U_SUCCESS(error) && info.errors == 0 && anl > 0) {
+    if (idna && U_SUCCESS(error) && info.errors == 0 && anl > 0) {
 	buf[anl] = 0;				/* XXX */
 	if (midna_domain_to_ascii(buf) == 0)
 	    return (0);

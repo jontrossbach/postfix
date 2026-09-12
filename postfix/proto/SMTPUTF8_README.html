@@ -1,5 +1,5 @@
 <!doctype html public "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+        "https://www.w3.org/TR/html4/loose.dtd">
 
 <html>
 
@@ -8,6 +8,7 @@
 <title>Postfix SMTPUTF8 support</title>
 
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<link rel='stylesheet' type='text/css' href='postfix-doc.css'>
 
 </head>
 
@@ -244,7 +245,7 @@ turned on (smtputf8_enable = yes). </p>
 
 <p> For compatibility with pre-SMTPUTF8 environments, Postfix does
 not automatically set the "SMTPUTF8 requested" flag on messages
-from non-SMTPUTF8 clients that contain an UTF-8 header value or
+from non-SMTPUTF8 clients that contain a UTF-8 header value or
 UTF-8 address localpart. This would make such messages undeliverable
 to non-SMTPUTF8 servers, and could be a barrier to SMTPUTF8 adoption.
 </p>
@@ -374,8 +375,8 @@ Firefox and Chrome web browsers. Specify "enable_idna2003_compatibility
 = yes" to get the historical behavior. </p>
 
 <p> This affects the conversion of domain names that contain for
-example the German sz (ß) and the Greek zeta (ς). See
-http://unicode.org/cldr/utility/idna.jsp for more examples. </p>
+example the German sz (ß) and the Greek (final) sigma (ς). See
+https://unicode.org/cldr/utility/idna.jsp for more examples. </p>
 
 <h2> <a name="credits">Credits</a> </h2>
 

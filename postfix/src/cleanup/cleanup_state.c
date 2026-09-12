@@ -33,6 +33,9 @@
 /*	Google, Inc.
 /*	111 8th Avenue
 /*	New York, NY 10011, USA
+/*
+/*	Wietse Venema
+/*	porcupine.org
 /*--*/
 
 /* System library. */
@@ -69,6 +72,7 @@ CLEANUP_STATE *cleanup_state_alloc(VSTREAM *src)
     state->attr_buf = vstring_alloc(10);
     state->temp1 = vstring_alloc(10);
     state->temp2 = vstring_alloc(10);
+    state->temp3 = vstring_alloc(10);
     if (cleanup_strip_chars)
 	state->stripped_buf = vstring_alloc(10);
     state->src = src;
@@ -107,8 +111,6 @@ CLEANUP_STATE *cleanup_state_alloc(VSTREAM *src)
     state->append_hdr_pt_target = -1;
     state->append_meta_pt_offset = -1;
     state->append_meta_pt_target = -1;
-    state->milter_hbc_checks = 0;
-    state->milter_hbc_reply = 0;
     state->rcpt_count = 0;
     state->reason = 0;
     state->smtp_reply = 0;
@@ -119,6 +121,7 @@ CLEANUP_STATE *cleanup_state_alloc(VSTREAM *src)
     state->hdr_rewrite_context = MAIL_ATTR_RWR_LOCAL;
     state->filter = 0;
     state->redirect = 0;
+    state->message_id = 0;
     state->dsn_envid = 0;
     state->dsn_ret = 0;
     state->dsn_notify = 0;
@@ -137,7 +140,8 @@ CLEANUP_STATE *cleanup_state_alloc(VSTREAM *src)
     state->milter_err_text = 0;
     state->milter_dsn_buf = 0;
     state->free_regions = state->body_regions = state->curr_body_region = 0;
-    state->smtputf8 = 0;
+    state->sendopts = 0;
+    state->reqtls_esmtp_hdr_seen = 0;
     return (state);
 }
 
@@ -148,6 +152,7 @@ void    cleanup_state_free(CLEANUP_STATE *state)
     vstring_free(state->attr_buf);
     vstring_free(state->temp1);
     vstring_free(state->temp2);
+    vstring_free(state->temp3);
     if (cleanup_strip_chars)
 	vstring_free(state->stripped_buf);
     if (state->fullname)
@@ -181,6 +186,8 @@ void    cleanup_state_free(CLEANUP_STATE *state)
 	myfree(state->filter);
     if (state->redirect)
 	myfree(state->redirect);
+    if (state->message_id)
+	myfree(state->message_id);
     if (state->dsn_envid)
 	myfree(state->dsn_envid);
     if (state->dsn_orcpt)

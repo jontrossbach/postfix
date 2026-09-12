@@ -229,7 +229,7 @@ static DOMAIN_LIST *flush_domains;
   * Silly little macros.
   */
 #define STR(x)			vstring_str(x)
-#define STREQ(x,y)		((x) == (y) || strcmp(x,y) == 0)
+#define STREQ(x,y)		(STRREF(x) == STRREF(y) || strcmp(x,y) == 0)
 
  /*
   * Forward declarations resulting from breaking up routines according to
@@ -479,7 +479,7 @@ static int flush_one_file(const char *queue_id, VSTRING *queue_file,
 		 path, queue_name, MAIL_QUEUE_INCOMING);
 
     /*
-     * If we got here, we achieved something, so let's claim succes.
+     * If we got here, we achieved something, so let's claim success.
      */
     return (1);
 }
@@ -571,8 +571,9 @@ static int flush_send_path(const char *path, int how)
 		     STR(queue_id), path);
 	    continue;
 	}
+	/* 202606 Qualys+Mythos: use htable_locate(), not htable_find(). */
 	if (dup_filter->used >= FLUSH_DUP_FILTER_SIZE
-	    || htable_find(dup_filter, STR(queue_id)) == 0) {
+	    || htable_locate(dup_filter, STR(queue_id)) == 0) {
 	    if (msg_verbose)
 		msg_info("%s: logfile %s: update queue file %s time stamps",
 			 myname, path, STR(queue_id));
@@ -698,6 +699,14 @@ static int flush_refresh_service(int max_age)
 static int flush_request_receive(VSTREAM *client_stream, VSTRING *request)
 {
     int     count;
+
+    /*
+     * Announce the protocol.
+     */
+    attr_print(client_stream, ATTR_FLAG_NONE,
+	       SEND_ATTR_STR(MAIL_ATTR_PROTO, MAIL_ATTR_PROTO_FLUSH),
+	       ATTR_TYPE_END);
+    (void) vstream_fflush(client_stream);
 
     /*
      * Kluge: choose the protocol depending on the request size.
